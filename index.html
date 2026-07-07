@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Site Register">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="theme-color" content="#23272d">
+<title>Site Register — Wormald</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:#1a1d21; color:#e8e8e8; }
+  body { overflow:hidden; }
+  #app { display:flex; flex-direction:column; height:100%; }
+
+  /* ---------- Top bar ---------- */
+  #topbar { display:flex; align-items:center; gap:8px; padding:8px 10px; background:#23272d; border-bottom:1px solid #333; flex-wrap:wrap; padding-top:calc(8px + env(safe-area-inset-top)); }
+  #topbar .title { font-weight:700; font-size:14px; color:#ff5a3c; white-space:nowrap; }
+  #topbar .ver { font-size:10px; color:#777; align-self:flex-start; }
+  #topbar .spacer { flex:1; }
+  .btn { border:1px solid #444; background:#2e333a; color:#e8e8e8; border-radius:8px; padding:8px 12px; font-size:13px; cursor:pointer; touch-action:manipulation; user-select:none; text-decoration:none; display:inline-block; }
+  .btn:active { background:#3a414a; }
+  .btn.primary { background:#ff5a3c; border-color:#ff5a3c; color:#fff; font-weight:600; position:relative; }
+  .btn.primary:active { background:#e04b30; }
+  .btn.danger { border-color:#a33; color:#ff8a7a; }
+  .btn.small { padding:5px 9px; font-size:12px; }
+  #dirtyDot { position:absolute; top:-4px; right:-4px; width:10px; height:10px; border-radius:50%; background:#ffd23c; border:1px solid #23272d; }
+  input[type=file] { display:none; }
+
+  /* ---------- Main ---------- */
+  #main { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:14px 12px calc(30px + env(safe-area-inset-bottom)); }
+  .page { max-width:760px; margin:0 auto; }
+  h2 { font-size:18px; margin-bottom:4px; }
+  .sub { font-size:12px; color:#999; margin-bottom:12px; }
+
+  /* ---------- Cards / rows ---------- */
+  .card { background:#23272d; border:1px solid #333; border-radius:12px; padding:14px; margin-bottom:10px; cursor:pointer; }
+  .card:active { background:#2a2f36; }
+  .card h3 { font-size:16px; margin-bottom:4px; }
+  .card .meta { font-size:12px; color:#999; }
+  .bar { height:6px; background:#333; border-radius:3px; margin-top:10px; overflow:hidden; }
+  .bar > div { height:100%; background:#ff5a3c; border-radius:3px; }
+
+  .siterow { display:flex; align-items:center; gap:10px; background:#23272d; border:1px solid #333; border-radius:10px; padding:11px 12px; margin-bottom:8px; cursor:pointer; }
+  .siterow:active { background:#2a2f36; }
+  .siterow .nm { font-size:14px; font-weight:600; }
+  .siterow .ad { font-size:11px; color:#888; margin-top:2px; }
+  .siterow .grow { flex:1; min-width:0; }
+  .chip { font-size:10px; font-weight:700; padding:3px 8px; border-radius:10px; white-space:nowrap; flex:0 0 auto; }
+  .chip.ok  { background:#1f3d27; color:#7ee08a; }
+  .chip.mid { background:#3d331f; color:#ffd23c; }
+  .chip.bad { background:#3d211f; color:#ff8a7a; }
+
+  #search { width:100%; padding:10px 12px; border-radius:10px; border:1px solid #444; background:#23272d; color:#e8e8e8; font-size:14px; margin-bottom:12px; }
+  #search::placeholder { color:#777; }
+
+  /* ---------- Site sheet ---------- */
+  .sitehead { margin-bottom:12px; }
+  .sitehead h2 { display:inline; cursor:pointer; }
+  .sitehead h2:after { content:" ✎"; font-size:12px; color:#666; }
+  .headbtns { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+  .fieldrow { background:#23272d; border:1px solid #333; border-radius:10px; padding:10px 12px; margin-bottom:8px; cursor:pointer; }
+  .fieldrow .lb { font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#8a939e; margin-bottom:3px; }
+  .fieldrow .vl { font-size:14px; white-space:pre-wrap; word-break:break-word; }
+  .fieldrow .vl.tbc { color:#ffd23c; font-style:italic; }
+  .fieldrow .vl a { color:#7ab8ff; text-decoration:none; }
+  .sect { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#8a939e; margin:16px 0 8px; }
+
+  /* ---------- Photos ---------- */
+  #photogrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(110px,1fr)); gap:8px; }
+  .ph { position:relative; border-radius:10px; overflow:hidden; border:1px solid #333; background:#23272d; cursor:pointer; aspect-ratio:4/3; }
+  .ph img { width:100%; height:100%; object-fit:cover; display:block; }
+  .ph .cap { position:absolute; left:0; right:0; bottom:0; background:rgba(0,0,0,.65); font-size:10px; padding:3px 6px; color:#ddd; }
+  .ph.add { display:flex; align-items:center; justify-content:center; flex-direction:column; gap:4px; color:#888; font-size:12px; border-style:dashed; }
+  .ph.add .plus { font-size:26px; color:#ff5a3c; }
+
+  /* ---------- Modal / viewer ---------- */
+  .overlay { position:fixed; inset:0; background:rgba(0,0,0,.72); display:flex; align-items:center; justify-content:center; z-index:50; padding:16px; }
+  .box { background:#23272d; border:1px solid #444; border-radius:14px; padding:16px; width:100%; max-width:560px; max-height:88vh; display:flex; flex-direction:column; gap:10px; }
+  .box h3 { font-size:14px; }
+  .box textarea { width:100%; min-height:130px; background:#1a1d21; color:#e8e8e8; border:1px solid #444; border-radius:8px; padding:10px; font-size:14px; font-family:inherit; resize:vertical; }
+  .box .row { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; }
+  #viewer { position:fixed; inset:0; background:rgba(0,0,0,.92); z-index:60; display:flex; flex-direction:column; }
+  #viewer img { flex:1; object-fit:contain; min-height:0; width:100%; }
+  #viewer .vbar { display:flex; gap:8px; padding:10px; justify-content:center; background:#181b1f; padding-bottom:calc(10px + env(safe-area-inset-bottom)); flex-wrap:wrap; }
+  #viewer .vcap { text-align:center; font-size:12px; color:#bbb; padding:8px 10px 0; }
+
+  /* ---------- Welcome ---------- */
+  .welcome { text-align:center; padding:40px 16px; }
+  .welcome .logo { font-size:40px; margin-bottom:12px; }
+  .welcome p { font-size:13px; color:#aaa; max-width:420px; margin:8px auto; line-height:1.5; }
+  .note { font-size:11px; color:#777; margin-top:14px; line-height:1.5; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <button id="backBtn" class="btn small" hidden>‹ Back</button>
+    <span class="title">Site Register</span><span class="ver">v1</span>
+    <span class="spacer"></span>
+    <button id="importBtn" class="btn small">Import</button>
+    <button id="exportBtn" class="btn small primary">Export<span id="dirtyDot" hidden></span></button>
+  </div>
+  <div id="main"></div>
+</div>
+<input type="file" id="fileIn">
+<input type="file" id="photoIn" accept="image/*">
+<div id="modal" class="overlay" hidden>
+  <div class="box">
+    <h3 id="mTitle"></h3>
+    <textarea id="mText"></textarea>
+    <div class="row">
+      <button id="mCancel" class="btn">Cancel</button>
+      <button id="mSave" class="btn primary">Save</button>
+    </div>
+  </div>
+</div>
+<div id="viewer" hidden>
+  <div class="vcap" id="vCap"></div>
+  <img id="vImg" alt="photo">
+  <div class="vbar">
+    <button id="vRelabel" class="btn">Rename label</button>
+    <button id="vDelete" class="btn danger">Delete photo</button>
+    <button id="vClose" class="btn primary">Close</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ================= state ================= */
+let reg = null;                 // register object
+let nav = { view:'home', ci:0, si:0 };
+let searchTerm = '';
+let dirty = false;
+let saveTimer = null;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const isTBC = v => !v || !String(v).trim() || String(v).trim().toUpperCase() === 'TBC';
+
+/* ================= IndexedDB ================= */
+function idb() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open('wsr-db', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function idbSet(k, v) {
+  const db = await idb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('kv', 'readwrite');
+    tx.objectStore('kv').put(v, k);
+    tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+  });
+}
+async function idbGet(k) {
+  const db = await idb();
+  return new Promise((res, rej) => {
+    const q = db.transaction('kv').objectStore('kv').get(k);
+    q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error);
+  });
+}
+
+function markDirty() {
+  dirty = true;
+  $('dirtyDot').hidden = false;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(persist, 400);
+}
+async function persist() {
+  try { await idbSet('register', reg); await idbSet('dirty', dirty); }
+  catch (e) { console.error('save failed', e); }
+}
+
+/* ================= helpers ================= */
+function outstanding(s) {
+  const o = [];
+  (s.fields || []).forEach(f => { if (isTBC(f.value)) o.push(f.label); });
+  if (isTBC(s.panelInstructions)) o.push('Panel Instructions');
+  return o;
+}
+function chipFor(s) {
+  const total = (s.fields || []).length + 1;
+  const out = outstanding(s).length;
+  if (out === 0) return '<span class="chip ok">Complete</span>';
+  if (out <= 3)  return '<span class="chip mid">In progress · ' + out + ' left</span>';
+  return '<span class="chip bad">Needs info · ' + out + '/' + total + '</span>';
+}
+function clientProgress(c) {
+  let total = 0, done = 0;
+  c.sites.forEach(s => {
+    const t = (s.fields || []).length + 1;
+    total += t; done += t - outstanding(s).length;
+  });
+  return { total, done, pct: total ? Math.round(done / total * 100) : 0 };
+}
+function linkifyPhones(text) {
+  // Australian numbers: 04xx xxx xxx, 02 xxxx xxxx, +61 formats
+  return esc(text).replace(/((?:\+61[\s]?|0)[2-478](?:[\s]?\d){7,9})/g, m => {
+    const tel = m.replace(/\s+/g, '');
+    return '<a href="tel:' + tel + '">' + m + '</a>';
+  });
+}
+function firstAddress(s) {
+  const f = (s.fields || []).find(x => x.label.toLowerCase().startsWith('address'));
+  return f ? f.value.split('\n')[0] : '';
+}
+
+/* ================= rendering ================= */
+function render() {
+  $('backBtn').hidden = (nav.view === 'home');
+  const m = $('main');
+  if (!reg) { m.innerHTML = welcomeHTML(); return; }
+  if (nav.view === 'home')   m.innerHTML = homeHTML();
+  if (nav.view === 'client') m.innerHTML = clientHTML();
+  if (nav.view === 'site')   m.innerHTML = siteHTML();
+  if (nav.view === 'client') {
+    const sb = $('search');
+    if (sb) { sb.value = searchTerm; sb.oninput = () => { searchTerm = sb.value; renderSiteList(); }; }
+    renderSiteList();
+  }
+}
+function welcomeHTML() {
+  return '<div class="page welcome">' +
+    '<div class="logo">🗂️</div><h2>Wormald Site Register</h2>' +
+    '<p>Client and site information for servicing — contacts, access, panel locations, instructions and photos. Works offline once loaded.</p>' +
+    '<p><button class="btn primary" data-act="import">Import register file</button></p>' +
+    '<p class="note">Open the <b>.json</b> register file you were sent. The data is stored on this device only — nothing is uploaded anywhere.</p></div>';
+}
+function homeHTML() {
+  let h = '<div class="page"><h2>Clients</h2><div class="sub">Register updated ' + esc(reg.updated || '—') + '</div>';
+  reg.clients.forEach((c, i) => {
+    const p = clientProgress(c);
+    h += '<div class="card" data-ci="' + i + '"><h3>' + esc(c.name) + '</h3>' +
+         '<div class="meta">' + c.sites.length + ' sites · ' + p.done + ' of ' + p.total + ' fields captured (' + p.pct + '%)</div>' +
+         '<div class="bar"><div style="width:' + p.pct + '%"></div></div></div>';
+  });
+  h += '<button class="btn small" data-act="addclient">+ Add client</button>' +
+       '<div class="note">Changes save automatically on this device. Use <b>Export</b> to share the updated register with colleagues (yellow dot = changes not yet exported).</div></div>';
+  return h;
+}
+function clientHTML() {
+  const c = reg.clients[nav.ci];
+  const p = clientProgress(c);
+  return '<div class="page"><h2>' + esc(c.name) + '</h2>' +
+    '<div class="sub">' + c.sites.length + ' sites · ' + p.done + '/' + p.total + ' fields captured (' + p.pct + '%)</div>' +
+    '<input id="search" type="search" placeholder="Search sites, addresses, contacts…">' +
+    '<div id="sitelist"></div>' +
+    '<button class="btn small" data-act="addsite">+ Add site</button></div>';
+}
+function renderSiteList() {
+  const c = reg.clients[nav.ci];
+  const q = searchTerm.trim().toLowerCase();
+  let h = '';
+  c.sites.forEach((s, i) => {
+    if (q) {
+      const hay = (s.name + ' ' + (s.fields || []).map(f => f.value).join(' ')).toLowerCase();
+      if (!hay.includes(q)) return;
+    }
+    h += '<div class="siterow" data-si="' + i + '"><div class="grow"><div class="nm">' + esc(s.name) + '</div>' +
+         '<div class="ad">' + esc(firstAddress(s)) + '</div></div>' + chipFor(s) + '</div>';
+  });
+  $('sitelist').innerHTML = h || '<div class="sub">No sites match.</div>';
+}
+function siteHTML() {
+  const s = reg.clients[nav.ci].sites[nav.si];
+  let h = '<div class="page"><div class="sitehead"><h2 data-act="rename">' + esc(s.name) + '</h2> ' + chipFor(s) +
+          '<div class="headbtns">';
+  if (s.mapUrl) h += '<a class="btn small" href="' + esc(s.mapUrl) + '" target="_blank" rel="noopener">📍 Open in Maps</a>';
+  h += '<button class="btn small" data-act="editmap">✎ Map link</button></div></div>';
+
+  (s.fields || []).forEach((f, i) => {
+    const tbc = isTBC(f.value);
+    const val = tbc ? 'TBC — tap to fill in'
+      : (f.label.toLowerCase().startsWith('contact') ? linkifyPhones(f.value) : esc(f.value));
+    h += '<div class="fieldrow" data-fi="' + i + '"><div class="lb">' + esc(f.label) + '</div>' +
+         '<div class="vl' + (tbc ? ' tbc' : '') + '">' + val + '</div></div>';
+  });
+
+  const pi = isTBC(s.panelInstructions);
+  h += '<div class="sect">Panel instructions</div>' +
+       '<div class="fieldrow" data-act="editinstr"><div class="vl' + (pi ? ' tbc' : '') + '">' +
+       (pi ? 'TBC — tap to fill in' : esc(s.panelInstructions)) + '</div></div>';
+
+  const ai = isTBC(s.additionalInfo);
+  h += '<div class="sect">Additional information</div>' +
+       '<div class="fieldrow" data-act="editinfo"><div class="vl' + (ai ? ' tbc' : '') + '">' +
+       (ai ? 'TBC — tap to fill in' : esc(s.additionalInfo)) + '</div></div>';
+
+  h += '<div class="sect">Photos (' + (s.photos || []).length + ')</div><div id="photogrid">';
+  (s.photos || []).forEach((p, i) => {
+    h += '<div class="ph" data-pi="' + i + '"><img src="' + p.data + '" alt=""><div class="cap">' + esc(p.label || 'Photo') + '</div></div>';
+  });
+  h += '<div class="ph add" data-act="addphoto"><div class="plus">＋</div>Add photo</div></div>';
+
+  h += '<div style="margin-top:26px"><button class="btn small danger" data-act="delsite">Delete this site</button></div></div>';
+  return h;
+}
+
+/* ================= modal editor ================= */
+let modalCb = null;
+function editText(title, value, cb) {
+  $('mTitle').textContent = title;
+  $('mText').value = isTBC(value) ? '' : value;
+  $('modal').hidden = false;
+  $('mText').focus();
+  modalCb = cb;
+}
+$('mSave').onclick = () => {
+  const v = $('mText').value.trim();
+  $('modal').hidden = true;
+  if (modalCb) modalCb(v === '' ? 'TBC' : v);
+  modalCb = null;
+};
+$('mCancel').onclick = () => { $('modal').hidden = true; modalCb = null; };
+
+/* ================= photo viewer ================= */
+let viewPi = -1;
+function openViewer(pi) {
+  const s = reg.clients[nav.ci].sites[nav.si];
+  const p = s.photos[pi];
+  viewPi = pi;
+  $('vImg').src = p.data;
+  $('vCap').textContent = p.label || 'Photo';
+  $('viewer').hidden = false;
+}
+$('vClose').onclick = () => { $('viewer').hidden = true; };
+$('vRelabel').onclick = () => {
+  const s = reg.clients[nav.ci].sites[nav.si];
+  const cur = s.photos[viewPi].label || 'Photo';
+  const nl = prompt('Photo label (e.g. Entry Photo, Site Photo, Panel Photo):', cur);
+  if (nl !== null && nl.trim()) { s.photos[viewPi].label = nl.trim(); $('vCap').textContent = nl.trim(); markDirty(); render(); }
+};
+$('vDelete').onclick = () => {
+  if (!confirm('Delete this photo?')) return;
+  const s = reg.clients[nav.ci].sites[nav.si];
+  s.photos.splice(viewPi, 1);
+  $('viewer').hidden = true;
+  markDirty(); render();
+};
+
+/* ================= events ================= */
+$('backBtn').onclick = () => {
+  if (nav.view === 'site') nav = { view:'client', ci:nav.ci, si:0 };
+  else { nav = { view:'home', ci:0, si:0 }; searchTerm = ''; }
+  render();
+};
+$('importBtn').onclick = () => $('fileIn').click();
+$('main').addEventListener('click', e => {
+  const t = e.target.closest('[data-ci],[data-si],[data-fi],[data-pi],[data-act]');
+  if (!t) return;
+  if (t.dataset.act === 'import') { $('fileIn').click(); return; }
+  if (!reg) return;
+  const s = (nav.view === 'site') ? reg.clients[nav.ci].sites[nav.si] : null;
+
+  if (t.dataset.ci !== undefined) { nav = { view:'client', ci:+t.dataset.ci, si:0 }; searchTerm = ''; render(); return; }
+  if (t.dataset.si !== undefined) { nav = { view:'site', ci:nav.ci, si:+t.dataset.si }; render(); return; }
+  if (t.dataset.fi !== undefined) {
+    const f = s.fields[+t.dataset.fi];
+    editText(f.label, f.value, v => { f.value = v; markDirty(); render(); });
+    return;
+  }
+  if (t.dataset.pi !== undefined) { openViewer(+t.dataset.pi); return; }
+
+  switch (t.dataset.act) {
+    case 'addclient': {
+      const nm = prompt('Client name:');
+      if (nm && nm.trim()) {
+        reg.clients.push({ id:'c' + Date.now(), name:nm.trim(), sites:[] });
+        markDirty(); render();
+      }
+      break;
+    }
+    case 'addsite': {
+      const nm = prompt('Site name:');
+      if (nm && nm.trim()) {
+        const c = reg.clients[nav.ci];
+        const tmpl = c.sites[0] ? c.sites[0].fields.map(f => ({ label:f.label, value:'TBC' }))
+          : [{label:'Contact',value:'TBC'},{label:'Address',value:'TBC'},{label:'Panel Location',value:'TBC'},{label:'Access Requirements',value:'TBC'}];
+        c.sites.push({ name:nm.trim(), mapUrl:'', fields:tmpl, panelInstructions:'TBC', additionalInfo:'TBC', photos:[] });
+        markDirty(); render();
+      }
+      break;
+    }
+    case 'rename':
+      editText('Site name', s.name, v => { if (v !== 'TBC') s.name = v; markDirty(); render(); });
+      break;
+    case 'editmap':
+      editText('Map link (Google Maps URL)', s.mapUrl || '', v => { s.mapUrl = (v === 'TBC') ? '' : v; markDirty(); render(); });
+      break;
+    case 'editinstr':
+      editText('Panel instructions', s.panelInstructions, v => { s.panelInstructions = v; markDirty(); render(); });
+      break;
+    case 'editinfo':
+      editText('Additional information', s.additionalInfo, v => { s.additionalInfo = v; markDirty(); render(); });
+      break;
+    case 'addphoto':
+      $('photoIn').click();
+      break;
+    case 'delsite':
+      if (confirm('Delete "' + s.name + '" and all its info/photos? This cannot be undone.')) {
+        reg.clients[nav.ci].sites.splice(nav.si, 1);
+        nav = { view:'client', ci:nav.ci, si:0 };
+        markDirty(); render();
+      }
+      break;
+  }
+});
+
+/* ================= import ================= */
+$('fileIn').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  let data;
+  try { data = JSON.parse(await file.text()); }
+  catch { alert('That file is not a valid register file (could not read it as JSON).'); return; }
+  if (!data || !Array.isArray(data.clients)) { alert('That file does not look like a Site Register file.'); return; }
+  if (reg && !confirm('Replace the register currently on this device with the imported file?')) return;
+  reg = data;
+  dirty = false; $('dirtyDot').hidden = true;
+  nav = { view:'home', ci:0, si:0 };
+  await persist();
+  render();
+});
+
+/* ================= add photo ================= */
+$('photoIn').addEventListener('change', e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.onload = () => {
+    const MAX = 1400;
+    let { width:w, height:h } = img;
+    if (Math.max(w, h) > MAX) { const k = MAX / Math.max(w, h); w = Math.round(w * k); h = Math.round(h * k); }
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    cv.getContext('2d').drawImage(img, 0, 0, w, h);
+    URL.revokeObjectURL(url);
+    const dataUrl = cv.toDataURL('image/jpeg', 0.8);
+    const s = reg.clients[nav.ci].sites[nav.si];
+    if (!s.photos) s.photos = [];
+    const label = prompt('Photo label (e.g. Entry Photo, Site Photo, Panel Photo):', 'Site Photo');
+    s.photos.push({ label:(label && label.trim()) ? label.trim() : 'Photo', data:dataUrl });
+    markDirty(); render();
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); alert('Could not read that image.'); };
+  img.src = url;
+});
+
+/* ================= export ================= */
+function isMobileShare() { return /iPad|iPhone|iPod|Android/.test(navigator.userAgent); }
+function canShareFile(file) { return isMobileShare() && navigator.canShare && navigator.canShare({ files:[file] }); }
+$('exportBtn').onclick = async () => {
+  if (!reg) { alert('Nothing to export yet — import a register file first.'); return; }
+  reg.updated = new Date().toISOString().slice(0, 10);
+  await persist();
+  const name = 'wormald-register-' + reg.updated + '.json';
+  const blob = new Blob([JSON.stringify(reg)], { type:'application/json' });
+  const file = new File([blob], name, { type:'application/json' });
+  if (canShareFile(file)) {
+    navigator.share({ files:[file], title:name }).catch(() => {});
+  } else {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+  dirty = false; $('dirtyDot').hidden = true;
+  await idbSet('dirty', false);
+  render();
+};
+
+/* ================= boot ================= */
+(async () => {
+  try {
+    reg = (await idbGet('register')) || null;
+    dirty = (await idbGet('dirty')) || false;
+    $('dirtyDot').hidden = !dirty;
+  } catch (e) { console.error(e); }
+  render();
+})();
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
