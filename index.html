@@ -161,12 +161,13 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span style="font-size:11px;color:#7c8a91">register v1.0 (fs 0.28)</span>
+      <span style="font-size:11px;color:#7c8a91">register v1.1 (fs 0.29)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsThemeBtn" title="Light / dark">&#127765;</button>
       <button class="fsbtn" id="fsLoadRegBtn" title="Load / replace the register file">&#128194; Load</button>
       <button class="fsbtn" id="fsProfileBtn" title="Load your company profile file (branding + equipment fields + test checklists)">&#127970; Profile</button>
+      <button class="fsbtn" id="fsResBtn" title="Resources — tools &amp; library">&#128218; Resources</button>
       <button class="fsbtn" id="fsBackupsBtn" title="Register backups kept on this device">&#128336;</button>
       <button class="fsbtn" id="fsPlannerBtn" style="display:none" title="Monthly planner + day routes">&#128197; Planner</button>
       <button class="fsbtn" id="fsExportReg" style="display:none">&#128190; Export register</button>
@@ -215,13 +216,14 @@
     <button class="btn" id="fsBack" title="Back to site">&#9664; Site</button>
     <button class="btn" id="fsTestBtn" title="Start or continue a Monthly / 6 Monthly / Annual / 5 Yearly test session" style="background:#1b8a3f;border-color:#2fae57;color:#fff;font-weight:700">&#9654; Start test</button>
     <button class="btn" id="fsBinBtn" title="Site recycle bin — replaced/deleted registered devices">&#128465; Bin</button>
-    <span class="title">FIRESPARK <span style="color:#888;font-weight:400;font-size:11px">v0.28 beta</span></span>
+    <span class="title">FIRESPARK <span style="color:#888;font-weight:400;font-size:11px">v0.29 beta</span></span>
     <span id="fsSiteName" style="font-size:12px;color:#8ab4ff;font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
     <button class="btn" id="btnPlans" title="Plans saved on this device">&#9776; Plans</button>
     <button class="btn" id="btnNew" title="Start a new plan">&#65291; New</button>
     <button class="btn" id="btnOpenProj" title="Open a PDF plan or saved project">&#128194; Open</button>
     <button class="btn" id="btnPhoto" title="Photo of the plan (camera on tablet/phone)">&#128247; Photo</button>
     <button class="btn" id="btnSaveProj" title="Save project file">&#128190; Save</button>
+    <button class="btn" id="btnSaveAs" title="Save as a NEW project file (always asks where)">Save As</button>
     <button class="btn" id="btnFit" title="Fit the whole plan on screen">Fit all</button>
     <button class="btn" id="btnPageSpace" title="Add white space below the plan">Page +</button>
     <button class="btn" id="btnPageMinus" title="Remove added white space">Page &minus;</button>
@@ -499,6 +501,53 @@
     <div id="fsBinBody"></div>
   </div>
 </div>
+<div class="modal" id="fsResModal" style="z-index:120">
+  <div class="modalbox" style="max-width:470px;width:94vw;max-height:82vh;overflow-y:auto;text-align:left">
+    <h3 style="margin-bottom:10px">Resources</h3>
+    <div style="font-weight:700;font-size:13px;color:#7ddb8f;margin-bottom:6px">TOOLS</div>
+    <button class="btn" id="fsResBatt" style="width:100%;text-align:left;margin-bottom:8px">&#128267; Battery calculator (AS 1851 App F)</button>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;margin-bottom:6px;cursor:pointer"><input type="checkbox" id="fsResFade"> Client list due-date colour fade</label>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;margin-bottom:14px;cursor:pointer"><input type="checkbox" id="fsResIso"> Isolation restore gate on tests</label>
+    <div style="font-weight:700;font-size:13px;color:#7ddb8f;margin-bottom:6px">LIBRARY</div>
+    <div style="font-size:12px;color:#999;margin-bottom:8px">Reference documents (standards, manuals). Stored on this device only &mdash; add them once per device.</div>
+    <div id="fsLibList"></div>
+    <button class="btn" id="fsLibAdd" style="margin-top:8px">&#65291; Add file to library</button>
+    <input type="file" id="fsLibInput" accept="application/pdf,.pdf" style="display:none">
+    <div class="row" style="margin-top:14px"><button class="btn" id="fsResClose">Close</button></div>
+  </div>
+</div>
+<div class="modal" id="fsBattModal" style="z-index:121">
+  <div class="modalbox" style="max-width:430px;width:94vw;text-align:left">
+    <h3 style="margin-bottom:2px">Battery calculator</h3>
+    <div style="font-size:12px;color:#999;margin-bottom:10px">Required capacity &mdash; enter loads in AMPS</div>
+    <label>Quiescent load Iq (A)</label><input type="text" inputmode="decimal" id="battIq" placeholder="e.g. 0.35">
+    <label style="margin-top:8px">Alarm load IA (A)</label><input type="text" inputmode="decimal" id="battIA" placeholder="e.g. 1.8">
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <div style="flex:1"><label>Standby</label><select id="battStby" style="width:100%"><option value="24">24 h</option><option value="48">48 h</option><option value="72">72 h</option></select></div>
+      <div style="flex:1"><label>Alarm</label><select id="battAlm" style="width:100%"><option value="0.5">30 min</option><option value="1">60 min</option></select></div>
+      <div style="flex:1"><label>Factor</label><input type="text" inputmode="decimal" id="battFac" value="1.25"></div>
+    </div>
+    <div id="battOut" style="margin-top:12px;padding:10px 12px;border:1px solid #2fae57;border-radius:8px;font-size:14px;color:#7ddb8f">Enter Iq and IA</div>
+    <h3 style="margin:16px 0 2px;font-size:15px">Discharge test (AS 1851-2012 App F)</h3>
+    <label>Installed battery capacity (Ah)</label><input type="text" inputmode="decimal" id="battAh" placeholder="e.g. 18">
+    <div id="battOut2" style="margin-top:8px;padding:10px 12px;border:1px solid #444;border-radius:8px;font-size:13.5px;color:#ccc">Enter the installed Ah</div>
+    <div class="row" style="margin-top:12px"><button class="btn" id="battClose">Close</button></div>
+  </div>
+</div>
+<div class="modal" id="fsAfssModal" style="z-index:121">
+  <div class="modalbox" style="max-width:430px;width:94vw;text-align:left">
+    <h3 style="margin-bottom:4px">AFSS evidence pack</h3>
+    <div style="font-size:12.5px;color:#999;margin-bottom:10px">Supporting records for the building owner's Annual Fire Safety Statement.</div>
+    <label>Year</label><input type="text" inputmode="numeric" id="afssYear" style="max-width:110px">
+    <div style="margin-top:10px;display:flex;flex-direction:column;gap:7px;font-size:13.5px">
+      <label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="afssMeas" checked> Fire safety measures / equipment on site</label>
+      <label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="afssCyc" checked> Routine service status (AS 1851 cycles)</label>
+      <label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="afssTests" checked> Test records for the year</label>
+      <label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="afssDef" checked> Defect register (raised / rectified / open)</label>
+    </div>
+    <div class="row" style="margin-top:14px"><button class="btn" id="afssClose">Cancel</button><button class="btn primary" id="afssGo">Generate PDF</button></div>
+  </div>
+</div>
 <div class="modal" id="fsProfModal" style="z-index:120">
   <div class="modalbox" style="max-width:430px;width:94vw;text-align:left">
     <h3 style="margin-bottom:4px">Company profile</h3>
@@ -654,7 +703,8 @@ const TOOLS_TAB = [
   { id:"photos", label:"Site photos", icon:"🖼" },
   { id:"find",    label:"Find device", icon:"🔎" },
   { id:"measure", label:"Measure",     icon:"📏" },
-  { id:"zones",   label:"Zones (ZN)",  icon:"⬠" }
+  { id:"zones",   label:"Zones (ZN)",  icon:"⬠" },
+  { id:"battcalc", label:"Battery calc", icon:"🔋" }
 ];
 const MARKUP_TOOLS = [
   { id:"pen",     label:"Pen",         icon:"✏️" },
@@ -2584,6 +2634,7 @@ function buildPalette() {
       if (t.id === "timer") { openTimer(); return; }
       if (t.id === "photos") { openPhotosGallery(); return; }
       if (t.id === "find") { openFind(); return; }
+      if (t.id === "battcalc") { openBattCalc(); return; }
       if (t.id !== "hatch" && MODIFY_TOOLS.some(m => m.id === t.id)) { modifyAction(t.id); return; }
       setTool(t.id);
     };
@@ -3359,7 +3410,7 @@ async function saveProject() {
       const w = await fileHandle.createWritable();
       await w.write(projectBlob());
       await w.close();
-      noteSaved("Saved");
+      noteSaved("Saved" + (fileHandle && fileHandle.name ? " \u2014 " + fileHandle.name : ""));
       return;
     } catch (err) {
       if (err && err.name === "AbortError") return;   // user cancelled picker
@@ -3372,7 +3423,7 @@ async function saveProject() {
         const w2 = await fileHandle.createWritable();
         await w2.write(projectBlob());
         await w2.close();
-        noteSaved("Saved");
+        noteSaved("Saved" + (fileHandle && fileHandle.name ? " \u2014 " + fileHandle.name : ""));
         return;
       } catch (err2) {
         if (err2 && err2.name === "AbortError") return;
@@ -3389,6 +3440,7 @@ async function saveProject() {
   noteSaved("Exported");
 }
 document.getElementById("btnSaveProj").onclick = saveProject;
+document.getElementById("btnSaveAs").onclick = () => { fileHandle = null; saveProject(); };
 
 function loadProjectFile(file) {
   const reader = new FileReader();
@@ -3509,6 +3561,15 @@ async function autosaveNow() {
   try {
     syncLevel();
     await idbPut(fsAutoKey(), { levels:levels, cur:curLevel, labelsOn:labelsOn, siteNotes:siteNotes, sitePhotos:sitePhotos, t:Date.now() });
+    // the plan also lives IN the register now, so it travels between devices with the file
+    if (typeof fsSite !== "undefined" && fsSite && typeof fsSiteCtx !== "undefined" && fsSiteCtx) {
+      fsSite.plan = { levels: levels, cur: curLevel, labelsOn: labelsOn, siteNotes: siteNotes, sitePhotos: sitePhotos, t: Date.now() };
+      if (typeof fsRegister !== "undefined" && fsRegister) {
+        fsDirty = true;
+        idbPut("fsRegister", fsRegister).catch(() => {});
+        if (typeof fsStamp === "function") fsStamp();
+      }
+    }
     if (currentProjId) {
       await idbPut("proj:" + currentProjId, planSnapshot());
       const ix = (await idbGet("projIndex")) || [];
@@ -3523,7 +3584,10 @@ document.addEventListener("visibilitychange", () => { if (document.hidden) autos
 
 async function tryRestoreAutosave() {
   try {
-    const a = await idbGet(fsAutoKey());
+    let a = null;
+    try { a = await idbGet(fsAutoKey()); } catch (e2) {}
+    const b = (typeof fsSite !== "undefined" && fsSite && fsSite.plan && fsSite.plan.levels) ? fsSite.plan : null;
+    if (b && (!a || (b.t || 0) > (a.t || 0))) a = b;   // register-carried plan wins when newer (cross-device)
     if (!a || (!a.image && !a.levels)) return;
     if (!a.levels) a.levels = [{ name:"Level 1", image:a.image, pageBaseH:a.pageBaseH || null, objects:a.objects }];
     a.levels.forEach(lv => { lv.objects = migrate(lv.objects); });
@@ -3840,6 +3904,8 @@ function timerTick() {
       timerHalt();
       try { localStorage.removeItem("bpm-timer"); } catch (e) {}
       if (navigator.vibrate) navigator.vibrate([300, 150, 300]);
+      fsBeepPlay();
+      try { if ("Notification" in window && Notification.permission === "granted") new Notification("\u23f1 Timer finished", { body: "Time is up \u2014 check the lights!" }); } catch (e) {}
       alert("⏱ Time is up — check the lights!");
       return;
     }
@@ -3851,8 +3917,35 @@ function timerTick() {
   const live = document.getElementById("timerLive");
   if (document.getElementById("timerModal").classList.contains("show")) live.textContent = text;
 }
+let fsBeepCtx = null;
+function fsBeepPrep() {
+  try {
+    fsBeepCtx = fsBeepCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (fsBeepCtx.state === "suspended") fsBeepCtx.resume();
+  } catch (e) {}
+}
+function fsBeepPlay() {
+  try {
+    if (!fsBeepCtx) return;
+    if (fsBeepCtx.state === "suspended") fsBeepCtx.resume();
+    for (let i = 0; i < 4; i++) {
+      const o = fsBeepCtx.createOscillator(), g = fsBeepCtx.createGain();
+      o.frequency.value = i % 2 ? 660 : 880;
+      o.connect(g); g.connect(fsBeepCtx.destination);
+      const t0 = fsBeepCtx.currentTime + i * 0.45;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.38);
+      o.start(t0); o.stop(t0 + 0.42);
+    }
+  } catch (e) {}
+}
 function timerBegin(down, minutes) {
   timerHalt();
+  if (down) {
+    fsBeepPrep();   // audio context needs a user gesture — grab it now for the finish beep
+    try { if ("Notification" in window && Notification.permission === "default") Notification.requestPermission(); } catch (e) {}
+  }
   if (down) {
     timerEndsAt = Date.now() + minutes * 60000;
     timerStartedAt = null;
@@ -5711,6 +5804,37 @@ function fsSiteWorstDot(site) {
   return worst;
 }
 
+function fsFadeOn() { try { return localStorage.getItem("fs-fade") !== "0"; } catch (e) { return true; } }
+function fsClientDueDays(c) {
+  let min = null;
+  const walk = s2 => {
+    FS_CYCLES.forEach(cy => {
+      const t = (s2.testing || {})[cy.key];
+      if (!t) return;
+      const last = new Date(t);
+      if (isNaN(last)) return;
+      const due = new Date(last); due.setMonth(due.getMonth() + cy.months);
+      const d = Math.floor((due - Date.now()) / 86400000);
+      if (min === null || d < min) min = d;
+    });
+    (s2.buildings || []).forEach(walk);
+  };
+  (c.sites || []).forEach(walk);
+  return min;
+}
+function fsLerpCol(a, b, t) {
+  const pa = [1, 3, 5].map(i => parseInt(a.substr(i, 2), 16));
+  const pb = [1, 3, 5].map(i => parseInt(b.substr(i, 2), 16));
+  return "#" + pa.map((v, i) => Math.round(v + (pb[i] - v) * t).toString(16).padStart(2, "0")).join("");
+}
+function fsClientFadeCol(c) {
+  const d = fsClientDueDays(c);
+  if (d === null) return "var(--fs-sub2)";
+  if (d <= 0) return "#c62828";
+  if (d >= 60) return "#1b8a3f";
+  if (d >= 30) return fsLerpCol("#b58900", "#1b8a3f", (d - 30) / 30);
+  return fsLerpCol("#c62828", "#b58900", d / 30);
+}
 function fsRenderClients() {
   const q = (document.getElementById("fsSearch").value || "").toLowerCase();
   const wrap = document.getElementById("fsClientList");
@@ -5721,7 +5845,8 @@ function fsRenderClients() {
     const row = document.createElement("div");
     row.className = "fscard";
     row.style.cssText += ";padding:16px;margin-bottom:10px;cursor:pointer;display:flex;align-items:center;gap:12px";
-    row.innerHTML = '<div style="flex:1"><div style="font-size:16.5px;font-weight:700">' + fsEsc(c.name) +
+    row.innerHTML = (fsFadeOn() ? '<span title="Closest test due across this client\'s sites" style="width:13px;height:13px;border-radius:50%;background:' + fsClientFadeCol(c) + ';flex:0 0 auto"></span>' : '') +
+      '<div style="flex:1"><div style="font-size:16.5px;font-weight:700">' + fsEsc(c.name) +
       '</div><div style="font-size:12.5px;color:var(--fs-sub2)">' + (c.sites || []).length + ' sites</div></div><div style="color:var(--fs-faint)">&#9654;</div>';
     row.onclick = () => { fsClient = c; fsRenderSites(); fsShow("fsSitesView"); };
     wrap.appendChild(row);
@@ -5753,7 +5878,7 @@ function fsInfoPhotoHtml() {
     html += '<div class="fslabel">' + (fsParentSite ? 'Building name' : 'Site name') + '</div><input class="fsinput" id="fsSiteNameIn" autocomplete="off" value="' + fsEsc(s.name || "") + '">';
     html += '<div class="fslabel">Address (shown under the site name)</div><input class="fsinput" id="fsSiteAddrIn" autocomplete="off" value="' + fsEsc(s.address || "") + '">';
   }
-  const infoRows = [["Access requirements", "access"], ["Contacts", "contacts"], ["Further information", "furtherInfo"]];
+  const infoRows = [["Access requirements", "access"], ["Contacts", "contacts"], ["Further information", "furtherInfo"], ["Isolation points (one per line \u2014 ticked off during tests)", "isolations"]];
   infoRows.forEach(([label, key]) => {
     if (fsInfoEdit) {
       html += '<div class="fslabel">' + label + '</div><textarea class="fsinput fsInfoField" data-key="' + key + '" rows="2">' + fsEsc(s[key] || "") + '</textarea>';
@@ -5925,14 +6050,23 @@ function fsRenderTab() {
           '<button class="fsbtn fsEquipPhoto" data-key="' + fsEsc(k) + '" style="padding:6px 9px">&#128247;</button>' +
           (en.photo ? '<button class="fsbtn fsEquipPhotoDel" data-key="' + fsEsc(k) + '" style="padding:6px 9px;color:#c62828">&#128465;</button>' : '') +
           '</div>' +
+          (/batter/i.test(k) ? '<div style="display:flex;gap:8px;align-items:center;margin:2px 0 4px 28px;font-size:12.5px;color:var(--fs-sub2)">Last replaced <input type="date" class="fsEqBattD" data-key="' + fsEsc(k) + '" value="' + fsEsc(en.d || "") + '" style="border:1px solid var(--fs-border);border-radius:6px;padding:4px;background:var(--fs-card);color:var(--fs-text)"></div>' : '') +
           (fsEquipItemFields().includes(k) ? fsEqItemsEditHtml(k, en) : '') +
           '<textarea class="fsinput fsEquipField" data-key="' + fsEsc(k) + '" rows="1" placeholder="Details (optional)" style="margin:4px 0 6px">' + fsEsc(en.v || "") + '</textarea>' +
           (en.photo ? '<img src="' + en.photo + '" class="fsPhotoView" style="max-width:150px;max-height:100px;border-radius:8px;margin-bottom:6px;cursor:pointer" title="Tap to view full size">' : '');
       } else if (en.on || en.v || en.photo || (en.items || []).length) {
         shown++;
         const its = (en.items || []).filter(x => x && (x.t || x.q));
+        let battChip = "";
+        if (/batter/i.test(k) && en.d) {
+          const mo = (Date.now() - new Date(en.d).getTime()) / 2592000000;
+          battChip = '<span style="font-size:11.5px;font-weight:700;border-radius:10px;padding:1px 8px;margin-left:8px;' +
+            (mo >= 24 ? 'background:#fdecea;color:#c62828">discharge test due (2 yr+, AS1851 3.13)' :
+             mo >= 20 ? 'background:#fdf3d7;color:#8a6d00">2-yr test coming up' :
+             'background:#e8f5e9;color:#1b8a3f">replaced ' + fsEsc(en.d)) + '</span>';
+        }
         html += '<div style="border-top:1px solid var(--fs-border);padding:11px 0">' +
-          '<div style="font-weight:700;font-size:14.5px"><span style="color:#1b8a3f">&#10003;</span> ' + k + '</div>' +
+          '<div style="font-weight:700;font-size:14.5px"><span style="color:#1b8a3f">&#10003;</span> ' + k + battChip + '</div>' +
           (its.length ? '<div style="font-size:13.5px;font-weight:600;margin-top:3px">' + its.map(x => fsEsc((x.q ? x.q + " \u00d7 " : "") + (x.t || ""))).join("<br>") + '</div>' : '') +
           (en.v ? '<div style="font-size:13.5px;color:var(--fs-sub);white-space:pre-wrap;margin-top:3px">' + fsEsc(en.v) + '</div>' : '') +
           (en.photo ? '<img src="' + en.photo + '" class="fsPhotoView" style="max-width:170px;max-height:120px;border-radius:8px;margin-top:6px;cursor:pointer" title="Tap to view full size">' : '') + '</div>';
@@ -5965,7 +6099,7 @@ function fsRenderTab() {
   if (fsTab === "history") {
     const hist = s.history || [];
     html += '<div class="fscard" style="padding:20px">';
-    html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><h3 style="font-size:16px;font-weight:700;flex:1">Test history</h3>' + (hist.length ? '<button class="fsbtn" id="fsYearPdfBtn">&#128197; Year summary PDF</button>' : '') + '</div>';
+    html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><h3 style="font-size:16px;font-weight:700;flex:1">Test history</h3>' + (hist.length ? '<button class="fsbtn" id="fsAfssBtn">&#128196; AFSS pack</button><button class="fsbtn" id="fsYearPdfBtn">&#128197; Year summary PDF</button>' : '') + '</div>';
     if (!hist.length) html += '<div style="color:var(--fs-faint);font-size:13.5px">No tests recorded yet. Open the Site Workspace and tap <b>&#9654; Start test</b>.</div>';
     hist.forEach(r => {
       const failBits = (r.checklist && r.checklist.f ? r.checklist.f : 0) + ((r.failedDevices || []).length);
@@ -6143,6 +6277,11 @@ function fsRenderTab() {
       fsMarkDirty();
       fsRenderSite();
     });
+    const ab = document.getElementById("fsAfssBtn");
+    if (ab) ab.onclick = () => {
+      document.getElementById("afssYear").value = String(new Date().getFullYear());
+      document.getElementById("fsAfssModal").classList.add("show");
+    };
     const yb = document.getElementById("fsYearPdfBtn");
     if (yb) yb.onclick = () => {
       const years = [...new Set((s.history || []).map(fsRecYear).filter(Boolean))].sort().reverse();
@@ -6286,6 +6425,11 @@ function fsSaveEquipDraft() {
     const k = f.dataset.key;
     fsSite.equipment[k] = fsSite.equipment[k] || {};
     fsSite.equipment[k].v = f.value.trim();
+  });
+  document.querySelectorAll(".fsEqBattD").forEach(f => {
+    const k = f.dataset.key;
+    fsSite.equipment[k] = fsSite.equipment[k] || {};
+    fsSite.equipment[k].d = f.value;
   });
   document.querySelectorAll(".fsEquipOn").forEach(cb => {
     const k = cb.dataset.key;
@@ -6628,6 +6772,68 @@ function fsCkSourceLabel() {
   return "Checklist file v" + fsChecklists.version + (fsChecklists.updated ? " (" + fsChecklists.updated + ")" : "") + " loaded";
 }
 
+function fsAfssPdf(opts) {
+  const s2 = fsSite, yr = opts.year;
+  const L = [];
+  L.push("Site: " + (s2.name || "") + (s2.address ? "  \u2014  " + s2.address : ""));
+  L.push("Client: " + (fsClient ? fsClient.name : ""));
+  L.push("Prepared " + new Date().toISOString().slice(0, 10) + " by " + fsDocBrand() + " \u00b7 routine service to AS 1851-2012");
+  L.push("");
+  if (opts.meas) {
+    L.push("FIRE SAFETY MEASURES / EQUIPMENT ON SITE");
+    fsEquipFields().forEach(k => {
+      const en = (s2.equipment || {})[k];
+      if (!en || !(en.on || en.v || (en.items || []).length)) return;
+      let line = "\u2022 " + k;
+      const its = (en.items || []).filter(x => x && (x.t || x.q)).map(x => (x.q ? x.q + " x " : "") + (x.t || ""));
+      if (its.length) line += ": " + its.join(", ");
+      else if (en.v) line += ": " + String(en.v).split("\n")[0];
+      L.push(line);
+    });
+    (s2.equipCustom || []).forEach(en => { if (en.on || en.v) L.push("\u2022 " + en.name + (en.v ? ": " + String(en.v).split("\n")[0] : "")); });
+    L.push("");
+  }
+  if (opts.cyc) {
+    L.push("ROUTINE SERVICE STATUS (AS 1851-2012)");
+    FS_CYCLES.forEach(c => {
+      const st = fsCycleStatus(s2, c);
+      const last = (s2.testing || {})[c.key];
+      L.push("\u2022 " + c.label + ": last done " + (last || "no record") + " \u2014 " + st.txt.replace("&nbsp;", " "));
+    });
+    L.push("");
+  }
+  if (opts.tests) {
+    L.push("TEST RECORDS \u2014 " + yr);
+    const recs = (s2.history || []).filter(r => String(r.finished || "").slice(0, 4) === String(yr));
+    if (!recs.length) L.push("(no tests recorded in " + yr + ")");
+    recs.slice().reverse().forEach(r => {
+      L.push("\u2022 " + (r.finished || "").slice(0, 10) + "  " + (r.label || r.mode) + (r.tech ? "  \u2014 " + r.tech : "") +
+        (r.checklist ? "  \u2014 " + r.checklist.p + " pass / " + r.checklist.f + " fail / " + r.checklist.na + " N/A" : "") +
+        (r.devices && r.devices.total ? "  \u2014 devices " + r.devices.tested + "/" + r.devices.total : ""));
+      (r.failsChecklist || []).forEach(x => L.push("     FAIL " + x.k + ": " + x.t.slice(0, 80) + (x.note ? " \u2014 " + x.note : "")));
+    });
+    L.push("");
+  }
+  if (opts.def) {
+    L.push("DEFECT REGISTER");
+    const defs = (s2.defects || []);
+    if (!defs.length) L.push("(no defects recorded)");
+    defs.forEach(d => {
+      L.push("\u2022 " + (d.created || "").slice(0, 10) + "  " + (d.desc || "").slice(0, 90) +
+        (d.closed ? "  \u2014 RECTIFIED " + d.closed.slice(0, 10) : "  \u2014 OPEN"));
+    });
+    L.push("");
+  }
+  L.push("This pack supports the owner's Annual Fire Safety Statement. The AFSS itself is issued by the");
+  L.push("building owner / accredited assessor. Records generated by " + fsDocBrand() + ".");
+  fsLinesPdf(L, fsDocBrand() + " \u2014 AFSS evidence pack " + yr + " \u2014 " + (s2.name || ""),
+    "afss-pack-" + yr + ".pdf");
+}
+function fsIsoLines() {
+  const s2 = (typeof fsSite !== "undefined" && fsSite) || {};
+  return String(s2.isolations || "").split("\n").map(x => x.trim()).filter(Boolean);
+}
+function fsIsoGateOn() { try { return localStorage.getItem("fs-isogate") !== "0"; } catch (e) { return true; } }
 function fsSessKey() { return "fs-session:" + (fsSiteCtx ? fsSiteCtx.siteId : "nosite"); }
 function fsSaveSession() { try { localStorage.setItem(fsSessKey(), JSON.stringify(fsSession)); } catch (e) {} fsTestBtnRefresh(); }
 function fsClearSession() { fsSession = null; try { localStorage.removeItem(fsSessKey()); } catch (e) {} fsTestBtnRefresh(); }
@@ -6721,6 +6927,18 @@ function fsRenderTest() {
   const def = fsChecklists.modes[fsSession.mode] || { label: fsSession.mode, sections: [] };
   let html = '<h3 style="margin-bottom:2px">' + fsEsc(def.label) + ' test — ' + fsEsc(fsSiteCtx ? fsSiteCtx.siteName : "") + '</h3>';
   html += '<div style="font-size:12px;color:#999;margin-bottom:10px">' + fsEsc(def.ref || "") + ' · started ' + fsSession.started.slice(0, 16).replace("T", " ") + (fsSession.tech ? ' · ' + fsEsc(fsSession.tech) : '') + '</div>';
+  const isoL = fsIsoGateOn() ? fsIsoLines() : [];
+  if (isoL.length) {
+    fsSession.iso = fsSession.iso || {};
+    html += '<div style="font-weight:700;font-size:14px;margin-top:8px;color:#ffb74d">&#9888; Isolations — isolate before testing, restore before finishing</div>';
+    isoL.forEach((ln, i) => {
+      const st = fsSession.iso[i] || {};
+      html += '<div style="display:flex;gap:10px;align-items:center;border-bottom:1px solid #33383f;padding:6px 0;font-size:13.5px">' +
+        '<div style="flex:1">' + fsEsc(ln) + '</div>' +
+        '<label style="display:flex;gap:4px;align-items:center;color:#ffb74d;cursor:pointer"><input type="checkbox" class="fsIsoCk" data-i="' + i + '" data-w="iso"' + (st.iso ? ' checked' : '') + '> isolated</label>' +
+        '<label style="display:flex;gap:4px;align-items:center;color:#7ddb8f;cursor:pointer"><input type="checkbox" class="fsIsoCk" data-i="' + i + '" data-w="res"' + (st.res ? ' checked' : '') + '> restored</label></div>';
+    });
+  }
   if (fsSession.mode === "annual") {
     html += '<div style="font-weight:700;font-size:14px;margin-top:4px">Device progress — tap devices in Test mode (year ' + testYearSel + ')</div>';
     html += fsZoneTableHtml(fsZoneProgress(), def.deviceTargets);
@@ -6878,6 +7096,13 @@ function fsRenderTest() {
     fsClearSession();
     fsRenderTest();
   };
+  document.querySelectorAll(".fsIsoCk").forEach(cb => cb.onchange = () => {
+    fsSession.iso = fsSession.iso || {};
+    const st = fsSession.iso[+cb.dataset.i] || {};
+    st[cb.dataset.w] = cb.checked;
+    fsSession.iso[+cb.dataset.i] = st;
+    fsSaveSession();
+  });
   document.getElementById("fsTestFinish").onclick = fsFinishTest;
 }
 
@@ -6891,6 +7116,15 @@ function fsFinishTest() {
     else if (r === "F") { f++; fails.push({ k: it.k, t: it.t, note: (fsSession.results[it.k] || {}).note || "" }); }
     else if (r === "NA") na++;
   }));
+  const isoL2 = fsIsoGateOn() ? fsIsoLines() : [];
+  if (isoL2.length) {
+    const isoSt = fsSession.iso || {};
+    const un = isoL2.filter((ln, i) => !(isoSt[i] && isoSt[i].res));
+    if (un.length) {
+      alert("RESTORE CHECK \u2014 confirm these are back to normal before the test can be recorded:\n\n\u2022 " + un.join("\n\u2022 ") + "\n\n(The gate can be turned off in \ud83d\udcda Resources if needed.)");
+      return;
+    }
+  }
   const answered = p + f + na;
   let total = 0;
   (def.sections || []).forEach(sec => total += (sec.items || []).length);
@@ -6912,7 +7146,8 @@ function fsFinishTest() {
     zones: fsSession.mode === "annual" ? fsZoneProgress() : null,
     spl: (fsSession.spl || []).filter(r => (r.loc || r.req || r.meas)),
     ews5: (fsSession.ews5 || []).filter(r => Object.values(r).some(v => v)),
-    failsChecklist: fails, failedDevices: failedDev, obs: fsSession.obs || ""
+    failsChecklist: fails, failedDevices: failedDev, obs: fsSession.obs || "",
+    isolations: isoL2.length ? isoL2.map((ln, i) => ({ t: ln, res: true })) : undefined
   };
   const site = fsSite;
   site.history = site.history || [];
@@ -6976,6 +7211,86 @@ document.getElementById("znRezone").onclick = () => {
 };
 document.getElementById("znShow").onchange = e => { zonesShow = e.target.checked; draw(); };
 
+/* ---------- Resources: tools + device-local library ---------- */
+async function fsLibGet() { try { return (await idbGet("fsLib")) || []; } catch (e) { return []; } }
+async function fsLibRender() {
+  const list = await fsLibGet();
+  const box = document.getElementById("fsLibList");
+  if (!list.length) { box.innerHTML = '<div style="font-size:13px;color:#777">Nothing here yet \u2014 add the standards PDFs from your files.</div>'; return; }
+  box.innerHTML = list.map((f, i) =>
+    '<div style="display:flex;gap:8px;align-items:center;border-bottom:1px solid #33383f;padding:7px 0">' +
+    '<a class="fsLibOpen" data-i="' + i + '" style="flex:1;color:#4fc3f7;cursor:pointer;font-size:13.5px">' + fsEsc(f.name) + '</a>' +
+    '<span style="font-size:11px;color:#777">' + Math.round((f.data || "").length * 0.75 / 1048576 * 10) / 10 + ' MB</span>' +
+    '<a class="fsLibDel" data-i="' + i + '" style="color:#c62828;cursor:pointer;padding:2px 6px">&#10005;</a></div>').join("");
+  box.querySelectorAll(".fsLibOpen").forEach(a => a.onclick = async () => {
+    const f = (await fsLibGet())[+a.dataset.i];
+    if (!f) return;
+    fetch(f.data).then(r => r.blob()).then(bl => window.open(URL.createObjectURL(bl), "_blank"));
+  });
+  box.querySelectorAll(".fsLibDel").forEach(a => a.onclick = async () => {
+    const list2 = await fsLibGet();
+    if (!confirm('Remove "' + (list2[+a.dataset.i] || {}).name + '" from this device\'s library?')) return;
+    list2.splice(+a.dataset.i, 1);
+    await idbPut("fsLib", list2);
+    fsLibRender();
+  });
+}
+document.getElementById("fsResBtn").onclick = () => {
+  document.getElementById("fsResFade").checked = fsFadeOn();
+  document.getElementById("fsResIso").checked = fsIsoGateOn();
+  fsLibRender();
+  document.getElementById("fsResModal").classList.add("show");
+};
+document.getElementById("fsResClose").onclick = () => document.getElementById("fsResModal").classList.remove("show");
+document.getElementById("fsResFade").onchange = e => { try { localStorage.setItem("fs-fade", e.target.checked ? "1" : "0"); } catch (er) {} if (fsRegister) fsRenderClients(); };
+document.getElementById("fsResIso").onchange = e => { try { localStorage.setItem("fs-isogate", e.target.checked ? "1" : "0"); } catch (er) {} };
+document.getElementById("fsResBatt").onclick = () => openBattCalc();
+document.getElementById("fsLibAdd").onclick = () => document.getElementById("fsLibInput").click();
+document.getElementById("fsLibInput").addEventListener("change", e => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = async () => {
+    const list = await fsLibGet();
+    list.push({ name: f.name, type: f.type || "application/pdf", data: rd.result, t: Date.now() });
+    try { await idbPut("fsLib", list); } catch (err) { alert("Couldn't store that file (device storage full?)"); return; }
+    fsLibRender();
+  };
+  rd.readAsDataURL(f);
+});
+function openBattCalc() {
+  document.getElementById("fsBattModal").classList.add("show");
+  battCalc();
+}
+function battCalc() {
+  const iq = parseFloat(document.getElementById("battIq").value);
+  const ia = parseFloat(document.getElementById("battIA").value);
+  const h = parseFloat(document.getElementById("battStby").value) || 24;
+  const a = parseFloat(document.getElementById("battAlm").value) || 0.5;
+  const fac = parseFloat(document.getElementById("battFac").value) || 1.25;
+  const out = document.getElementById("battOut");
+  if (isFinite(iq) && isFinite(ia)) {
+    const ah = fac * (iq * h + ia * a);
+    out.innerHTML = "Required capacity: <b style=\"font-size:17px\">" + (Math.round(ah * 100) / 100) + " Ah</b>" +
+      "<div style=\"font-size:11.5px;color:#999;margin-top:3px\">" + fac + " \u00d7 (" + iq + " A \u00d7 " + h + " h  +  " + ia + " A \u00d7 " + a + " h)</div>";
+  } else out.textContent = "Enter Iq and IA";
+  const cap = parseFloat(document.getElementById("battAh").value);
+  const out2 = document.getElementById("battOut2");
+  if (isFinite(cap) && cap > 0) {
+    out2.innerHTML = "Test load: <b>" + (Math.round(cap * 0.8 * 10) / 10) + " A</b> (0.8 \u00d7 C) \u00b7 apply for <b>25 min</b> \u00b7 pass if voltage stays \u2265 <b>21.0 V</b> (24 V set)" +
+      "<div style=\"font-size:11.5px;color:#888;margin-top:3px\">Battery must be fully charged first; subtract quiescent current if testing in circuit. Record load current + final voltage.</div>";
+  } else out2.textContent = "Enter the installed Ah";
+}
+["battIq", "battIA", "battStby", "battAlm", "battFac", "battAh"].forEach(id => document.getElementById(id).addEventListener("input", battCalc));
+document.getElementById("battClose").onclick = () => document.getElementById("fsBattModal").classList.remove("show");
+document.getElementById("afssClose").onclick = () => document.getElementById("fsAfssModal").classList.remove("show");
+document.getElementById("afssGo").onclick = () => {
+  const yr = (document.getElementById("afssYear").value || "").trim() || String(new Date().getFullYear());
+  document.getElementById("fsAfssModal").classList.remove("show");
+  fsAfssPdf({ year: yr, meas: document.getElementById("afssMeas").checked, cyc: document.getElementById("afssCyc").checked,
+              tests: document.getElementById("afssTests").checked, def: document.getElementById("afssDef").checked });
+};
 document.getElementById("fsTestBtn").onclick = fsOpenTest;
 document.getElementById("fsProfileBtn").onclick = () => {
   if (!fsProfile) { document.getElementById("fsProfileInput").click(); return; }
