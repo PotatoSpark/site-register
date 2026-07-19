@@ -161,7 +161,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.3 (fs 1.1)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.4 (fs 1.2)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsLoadRegBtn" title="Load / replace the register file">&#128194; Load</button>
@@ -8144,8 +8144,19 @@ function fsPlLoadSettings() {
   if (fsPlSettings) return fsPlSettings;
   try { fsPlSettings = JSON.parse(localStorage.getItem("fs-planner") || "null"); } catch (e) {}
   if (!fsPlSettings || !fsPlSettings.workDays) fsPlSettings = { dayStart: "07:00", dayEnd: "15:30", buffer: 10, workDays: [1, 2, 3, 4, 5], baseAddr: "", baseGeo: null };
+  if (fsPlSettings.lunch == null) fsPlSettings.lunch = 30;        // V1.2: lunch break, minutes (0 = off)
+  if (!fsPlSettings.lunchAt) fsPlSettings.lunchAt = "12:00";
   return fsPlSettings;
 }
+/* lunch break (V1.2): a floating reserved block. No stop may START inside the window;
+   a visit that runs THROUGH the lunch start absorbs it (you eat on site) and pushes
+   everything after it back by the lunch minutes. */
+function fsPlLunch(st) {
+  const m = Math.max(0, +st.lunch || 0);
+  return m ? { at: fsPlT2M(st.lunchAt) != null ? fsPlT2M(st.lunchAt) : 720, mins: m } : null;
+}
+function fsPlLunchStart(sM, lu) { return (lu && sM >= lu.at && sM < lu.at + lu.mins) ? lu.at + lu.mins : sM; }
+function fsPlLunchEnd(sM, mins, lu) { return (lu && sM < lu.at && sM + mins > lu.at) ? sM + mins + lu.mins : sM + mins; }
 function fsPlSaveSettings() { localStorage.setItem("fs-planner", JSON.stringify(fsPlSettings)); }
 async function fsPlLoadPlans() { if (fsPlPlans) return; try { fsPlPlans = (await idbGet("fsPlans")) || {}; } catch (e) { fsPlPlans = {}; } }
 function fsPlSavePlans() { idbPut("fsPlans", fsPlPlans).catch(function () {}); }
@@ -8288,15 +8299,16 @@ function fsPlOrderDay(stops, st, startM, endM, buf) {
     if (base) c += leg(ord[ord.length - 1], base);
     return c;
   };
+  const lu = fsPlLunch(st);
   const timeable = ord => {
     let t = startM, cur = base;
     const out = [];
     for (const en of ord) {
       const trv = cur ? leg(cur, en) : 0;
-      const sM = Math.max(t + trv, startM);
-      if (sM + en.x.mins > endM) return null;
+      const sM = fsPlLunchStart(Math.max(t + trv, startM), lu);
+      if (fsPlLunchEnd(sM, en.x.mins, lu) > endM) return null;
       out.push({ en: en, sM: sM });
-      t = sM + en.x.mins + buf;
+      t = fsPlLunchEnd(sM, en.x.mins, lu) + buf;
       cur = en;
     }
     return out;
@@ -8334,6 +8346,7 @@ function fsPlAutoPlan(selIds, fromDk, toDk) {  // deterministic greedy day-fill;
     if (st.workDays.indexOf(new Date(y, mNum - 1, d).getDay()) >= 0) workDates.push(dk);
   }
   const startM = fsPlT2M(st.dayStart) || 420, endM = fsPlT2M(st.dayEnd) || 930, buf = +st.buffer || 0;
+  const lu = fsPlLunch(st);
   if (st.baseGeo) fsPlSeedFrom = st.baseGeo;
   else {
     let la = 0, ln = 0, n = 0;
@@ -8357,9 +8370,9 @@ function fsPlAutoPlan(selIds, fromDk, toDk) {  // deterministic greedy day-fill;
     let cur = st.baseGeo ? { geo: st.baseGeo, id: "_base" } : null;
     let t = startM;
     if (carry) {
-      const chunk = Math.min(carry.remain, endM - startM);
+      const chunk = Math.min(carry.remain, Math.max(30, endM - startM - (lu ? lu.mins : 0)));   // lunch eats into a carry day
       mo.days[dk].push({ siteId: carry.e.s.id, start: fsPlM2T(startM), mins: chunk, done: false });
-      t = startM + chunk + buf;
+      t = fsPlLunchEnd(startM, chunk, lu) + buf;
       cur = { geo: carry.e.s.geo, id: carry.e.s.id };
       carry.remain -= chunk;
       if (carry.remain <= 0) carry = null;
@@ -8375,13 +8388,13 @@ function fsPlAutoPlan(selIds, fromDk, toDk) {  // deterministic greedy day-fill;
         const prefM = fsPlT2M(e.s.visit && e.s.visit.pref);
         let sM;
         if (prefM != null) {
-          if (prefM + mins > endM && !dayEmpty) return;          // doesn't fit before day end (multi-day visits may START on an empty day)
+          if (fsPlLunchEnd(prefM, mins, lu) > endM && !dayEmpty) return;   // doesn't fit before day end (multi-day visits may START on an empty day)
           if (prefM < startM) { if (!dayEmpty) return; }         // pref BEFORE day start: allowed as the day's FIRST stop (shown amber)
           else if (arrive > prefM) return;                       // can't make the preferred start any more today
-          sM = prefM;
+          sM = prefM;                                            // a preferred time is a hard constraint - it wins over the lunch window
         } else {
-          sM = Math.max(arrive, startM);
-          if (sM + mins > endM && !dayEmpty) return;             // long visits may start on an empty day and carry over
+          sM = fsPlLunchStart(Math.max(arrive, startM), lu);     // never START a visit inside the lunch window
+          if (fsPlLunchEnd(sM, mins, lu) > endM && !dayEmpty) return;   // long visits may start on an empty day and carry over
         }
         const wait = prefM != null ? Math.max(0, prefM - arrive) : 0;
         let key;
@@ -8391,14 +8404,15 @@ function fsPlAutoPlan(selIds, fromDk, toDk) {  // deterministic greedy day-fill;
         if (!best || fsPlKeyLt(key, bestKey)) { best = { e: e, sM: sM, mins: mins }; bestKey = key; }
       });
       if (!best) break;
-      const dayCap = endM - best.sM;
+      let dayCap = endM - best.sM;
+      if (lu && best.sM < lu.at && best.sM + dayCap > lu.at && dayCap - lu.mins > 0) dayCap -= lu.mins;   // lunch inside the remaining day
       if (best.mins > dayCap) {   // multi-day visit: fill today, carry the rest to following work days
         mo.days[dk].push({ siteId: best.e.s.id, start: fsPlM2T(best.sM), mins: dayCap, done: false });
         carry = { e: best.e, remain: best.mins - dayCap };
         t = endM;
       } else {
         mo.days[dk].push({ siteId: best.e.s.id, start: fsPlM2T(best.sM), mins: best.mins, done: false });
-        t = best.sM + best.mins + buf;
+        t = fsPlLunchEnd(best.sM, best.mins, lu) + buf;
       }
       cur = { geo: best.e.s.geo, id: best.e.s.id };
       remaining = remaining.filter(x => x !== best.e);
@@ -8531,12 +8545,19 @@ function fsPlPdf() {
   const lines = [["h", "Month plan — " + fsPlMonthName()]];
   const dks = Object.keys(mo.days).sort();
   if (!dks.length) { alert("Nothing planned yet."); return; }
+  const luP = fsPlLunch(fsPlLoadSettings());
   dks.forEach(dk => {
     const dt = new Date(+dk.slice(0, 4), +dk.slice(5, 7) - 1, +dk.slice(8, 10));
     lines.push(["b", dt.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }) + (mo.locked[dk] ? "  (locked)" : "")]);
-    (mo.days[dk] || []).slice().sort((a, b) => a.start.localeCompare(b.start)).forEach(x => {
+    const dayStops = (mo.days[dk] || []).slice().sort((a, b) => a.start.localeCompare(b.start));
+    let luDone = !luP || !dayStops.length;
+    dayStops.forEach(x => {
+      const sM2 = fsPlT2M(x.start);
+      const spans = !luDone && sM2 < luP.at && fsPlLunchEnd(sM2, x.mins, luP) > luP.at + luP.mins;
+      if (!luDone && !spans && sM2 >= luP.at) { lines.push(["t", "  " + fsPlM2T(luP.at) + "  Lunch break  (" + luP.mins + " min)"]); luDone = true; }
+      if (spans) luDone = true;
       const e = fsPlById(x.siteId);
-      lines.push(["t", "  " + x.start + "  " + (e ? e.s.name : x.siteId) + "  (" + x.mins + " min)" + (e ? "  · " + e.c.name : "")]);
+      lines.push(["t", "  " + x.start + "  " + (e ? e.s.name : x.siteId) + "  (" + x.mins + " min)" + (spans ? "  · incl. " + luP.mins + " min lunch" : "") + (e ? "  · " + e.c.name : "")]);
     });
   });
   (mo.tray || []).forEach(x => {
@@ -8740,7 +8761,9 @@ function fsPlRender() {
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">' +
       '<label style="font-size:11.5px;color:var(--fs-sub2)">Day start<br><input class="fsinput" id="fsPlCfgS" type="time" value="' + fsEsc(st.dayStart) + '" style="width:110px"></label>' +
       '<label style="font-size:11.5px;color:var(--fs-sub2)">Day end<br><input class="fsinput" id="fsPlCfgE" type="time" value="' + fsEsc(st.dayEnd) + '" style="width:110px"></label>' +
-      '<label style="font-size:11.5px;color:var(--fs-sub2)">Buffer min/stop<br><input class="fsinput" id="fsPlCfgB" type="number" min="0" step="5" value="' + fsEsc(st.buffer) + '" style="width:90px"></label></div>' +
+      '<label style="font-size:11.5px;color:var(--fs-sub2)">Buffer min/stop<br><input class="fsinput" id="fsPlCfgB" type="number" min="0" step="5" value="' + fsEsc(st.buffer) + '" style="width:90px"></label>' +
+      '<label style="font-size:11.5px;color:var(--fs-sub2)" title="0 = no lunch break">Lunch break (min)<br><input class="fsinput" id="fsPlCfgLu" type="number" min="0" step="5" value="' + fsEsc(st.lunch) + '" style="width:90px"></label>' +
+      '<label style="font-size:11.5px;color:var(--fs-sub2)">Lunch around<br><input class="fsinput" id="fsPlCfgLuAt" type="time" value="' + fsEsc(st.lunchAt) + '" style="width:110px"></label></div>' +
       '<div style="margin:10px 0 4px;font-size:11.5px;color:var(--fs-sub2)">Work days</div><div style="display:flex;gap:10px;flex-wrap:wrap">' +
       dows.map((d2, i) => '<label style="font-size:13px;display:flex;gap:4px;align-items:center"><input type="checkbox" class="fsPlCfgD" data-d="' + i + '"' + (st.workDays.indexOf(i) >= 0 ? ' checked' : '') + '>' + d2 + '</label>').join("") + '</div>' +
       '<div style="margin:10px 0 4px;font-size:11.5px;color:var(--fs-sub2)">Optional start/finish base (home or depot) - blank = day starts at the first site</div>' +
@@ -8806,6 +8829,8 @@ function fsPlRender() {
     st2.dayStart = document.getElementById("fsPlCfgS").value || "07:00";
     st2.dayEnd = document.getElementById("fsPlCfgE").value || "15:30";
     st2.buffer = +document.getElementById("fsPlCfgB").value || 0;
+    st2.lunch = Math.max(0, +document.getElementById("fsPlCfgLu").value || 0);
+    st2.lunchAt = document.getElementById("fsPlCfgLuAt").value || "12:00";
     st2.workDays = [...document.querySelectorAll(".fsPlCfgD")].filter(cb => cb.checked).map(cb => +cb.dataset.d);
     const nb = document.getElementById("fsPlCfgBase").value.trim();
     if (nb !== (st2.baseAddr || "")) { st2.baseAddr = nb; st2.baseGeo = null; }   // re-geocode on next Plan month
@@ -8833,15 +8858,25 @@ function fsPlDayHtml(dk) {
     '<button class="fsbtn fsPlLock">' + (mo.locked[dk] ? '&#128274; Locked' : '&#128275; Lock day') + '</button>' +
     '<button class="fsbtn fsPlDayIcs" title="Opens in Apple / Google / Samsung Calendar">&#128242; Add day to phone calendar</button></div>';
   if (!stops.length) html += '<div style="color:var(--fs-faint);font-size:13px">No stops planned this day.</div>';
+  const luD = fsPlLunch(fsPlLoadSettings());
+  let luShown = !luD || !stops.length;
   let prev = null;
   stops.forEach((x, i) => {
     const e = fsPlById(x.siteId);
+    const xsM = fsPlT2M(x.start);
+    const luSpan = !luShown && xsM < luD.at && fsPlLunchEnd(xsM, x.mins, luD) > luD.at + luD.mins;   // lunch falls inside this visit
+    if (!luShown && !luSpan && xsM >= luD.at) {
+      html += '<div style="border:1px dashed var(--fs-border);border-radius:10px;padding:7px 12px;margin:3px 0;font-size:12.5px;color:var(--fs-sub2)">&#129386; Lunch break &nbsp;' + fsPlM2T(luD.at) + ' &rarr; ' + fsPlM2T(luD.at + luD.mins) + ' (' + luD.mins + ' min)</div>';
+      luShown = true;
+    }
+    if (luSpan) luShown = true;
     if (prev) {
       const pe = fsPlById(prev.siteId);
       const trv = (pe && e) ? fsPlTravel(pe.s.geo, pe.s.id, e.s.geo, e.s.id) : null;
       html += '<div style="font-size:11.5px;color:var(--fs-faint);padding:2px 0 2px 14px">&#8595; ' + (trv ? (trv.est ? '~' : '') + trv.min + ' min drive' : 'drive time unknown') + '</div>';
     }
-    const endT = fsPlM2T(fsPlT2M(x.start) + x.mins);
+    const endT = fsPlM2T(fsPlLunchEnd(fsPlT2M(x.start), x.mins, luD));
+    const luNote = luSpan ? ' &middot; <span style="color:var(--fs-sub2)">&#129386; incl. ' + luD.mins + ' min lunch</span>' : '';
     html += '<div style="border:1px solid var(--fs-border);border-radius:10px;padding:9px 12px;margin:3px 0;' + (x.done ? 'opacity:.55' : '') + '">' +
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
       '<input type="checkbox" class="fsPlDone" data-i="' + i + '"' + (x.done ? ' checked' : '') + ' title="Done" style="width:17px;height:17px;accent-color:#1b8a3f">' +
@@ -8849,7 +8884,7 @@ function fsPlDayHtml(dk) {
       '<button class="fsbtnP fsPlNavB" data-i="' + i + '" style="padding:6px 11px;font-size:12px">&#9654; Navigate</button></div>' +
       '<div style="font-size:12px;color:var(--fs-sub);margin-top:3px">' +
       '<a class="fsPlTime" data-i="' + i + '" style="cursor:pointer;text-decoration:underline">' + fsEsc(x.start) + '</a>' +
-      ' &rarr; ' + endT + ' (' + fsPlFmtMins(x.mins) + ')' + (e && e.s.visit && e.s.visit.pref ? ' · pref ' + fsEsc(e.s.visit.pref) : '') + (e ? ' · ' + fsEsc(e.c.name) : '') +
+      ' &rarr; ' + endT + ' (' + fsPlFmtMins(x.mins) + ')' + luNote + (e && e.s.visit && e.s.visit.pref ? ' · pref ' + fsEsc(e.s.visit.pref) : '') + (e ? ' · ' + fsEsc(e.c.name) : '') +
       ((fsPlT2M(x.start) != null && fsPlT2M(x.start) < (fsPlT2M(fsPlLoadSettings().dayStart) || 420)) ? ' · <span style="color:#b45f00;font-weight:700">outside set hours</span>' : '') +
       ' · <a class="fsPlMove" data-i="' + i + '" style="cursor:pointer;text-decoration:underline">move</a>' +
       ' · <a class="fsPlDel" data-i="' + i + '" style="cursor:pointer;color:#c62828;text-decoration:underline">remove</a></div></div>';
