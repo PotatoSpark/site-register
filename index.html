@@ -161,14 +161,13 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span style="font-size:11px;color:#7c8a91">register v1.2 (fs 1.0)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.3 (fs 1.1)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
-      <button class="fsbtn" id="fsThemeBtn" title="Light / dark">&#127765;</button>
       <button class="fsbtn" id="fsLoadRegBtn" title="Load / replace the register file">&#128194; Load</button>
       <button class="fsbtn" id="fsProfileBtn" title="Load your company profile file (branding + equipment fields + test checklists)">&#127970; Profile</button>
       <button class="fsbtn" id="fsResBtn" title="Resources — tools &amp; library">&#128218; Resources</button>
-      <button class="fsbtn" id="fsBackupsBtn" title="Register backups kept on this device">&#128336;</button>
+      <button class="fsbtn" id="fsSettingsBtn" title="Settings">&#9881;</button>
       <button class="fsbtn" id="fsPlannerBtn" style="display:none" title="Monthly planner + day routes">&#128197; Planner</button>
       <button class="fsbtn" id="fsDashBtn" style="display:none" title="All-sites overview (admin passcode)">&#128202; Dashboard</button>
       <button class="fsbtn" id="fsExportReg" style="display:none">&#128190; Export register</button>
@@ -509,7 +508,6 @@
     <div style="font-weight:700;font-size:13px;color:#7ddb8f;margin-bottom:6px">TOOLS</div>
     <button class="btn" id="fsResBatt" style="width:100%;text-align:left;margin-bottom:8px">&#128267; Battery calculator (AS 1851 App F)</button>
     <button class="btn" id="fsResPa" style="width:100%;text-align:left;margin-bottom:8px">&#128226; PA announcements &mdash; record &amp; play</button>
-    <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;margin-bottom:6px;cursor:pointer"><input type="checkbox" id="fsResFade"> Client list due-date colour fade</label>
     <!-- isolation gate hidden for V1.0 - set display:flex (and restore fsIsoGateOn) to reinstate --><label style="display:none;align-items:center;gap:8px;font-size:13.5px;margin-bottom:14px;cursor:pointer"><input type="checkbox" id="fsResIso"> Isolation restore gate on tests</label>
     <div style="font-weight:700;font-size:13px;color:#7ddb8f;margin-bottom:6px">LIBRARY</div>
     <div style="font-size:12px;color:#999;margin-bottom:8px">Reference documents (standards, manuals). Stored on this device only &mdash; add them once per device.</div>
@@ -517,6 +515,33 @@
     <button class="btn" id="fsLibAdd" style="margin-top:8px">&#65291; Add file to library</button>
     <input type="file" id="fsLibInput" accept="application/pdf,.pdf" style="display:none">
     <div class="row" style="margin-top:14px"><button class="btn" id="fsResClose">Close</button></div>
+  </div>
+</div>
+<div class="modal" id="fsSettingsModal" style="z-index:120">
+  <div class="modalbox" style="max-width:470px;width:94vw;max-height:82vh;overflow-y:auto;text-align:left">
+    <h3 style="margin-bottom:14px">&#9881; Settings</h3>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <span style="flex:1;font-size:13.5px">Colour theme</span>
+      <button class="btn" id="fsThemeBtn" title="Light / dark">&#127765; Light / dark</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <span style="flex:1;font-size:13.5px">Register backups kept on this device</span>
+      <button class="btn" id="fsBackupsBtn">&#128336; Backups</button>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;margin-bottom:12px;cursor:pointer"><input type="checkbox" id="fsResFade"> Colour-code the client list by due dates</label>
+    <div style="margin-bottom:12px">
+      <div style="font-size:13.5px;margin-bottom:5px">Your name (stamped on register saves)</div>
+      <input id="fsSetName" autocomplete="off" style="width:100%;box-sizing:border-box;padding:9px;border-radius:8px;border:1px solid #4a5057;background:#1a1d21;color:#eee;font-size:14px" placeholder="e.g. R. Smith">
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+      <span style="flex:1;font-size:13.5px;min-width:120px">Version: <b id="fsSetVer"></b></span>
+      <button class="btn" id="fsSetUpd">&#8635; Check for updates</button>
+    </div>
+    <div style="border-top:1px solid #3a4047;padding-top:12px">
+      <button class="btn" id="fsSetWipe" style="color:#ff6b5e">&#128465; Clear this device's cached data</button>
+      <div style="font-size:11.5px;color:#888;margin-top:5px">Removes the cached register, backups, saved plans, planner data, PA recordings, library files and preferences from THIS device only. Register and plan files saved on disk / OneDrive are untouched &mdash; reload your register file afterwards.</div>
+    </div>
+    <div class="row" style="margin-top:14px"><button class="btn" id="fsSetClose">Close</button></div>
   </div>
 </div>
 <div class="modal" id="fsPaModal" style="z-index:121">
@@ -529,7 +554,7 @@
       <button class="btn" id="fsPaAdd">&#65291; Add audio file</button>
       <button class="btn" id="fsPaClose">Close</button>
     </div>
-    <input type="file" id="fsPaInput" accept="audio/*" style="display:none">
+    <input type="file" id="fsPaInput" accept="audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac" style="display:none">
   </div>
 </div>
 <div class="modal" id="fsBattModal" style="z-index:121">
@@ -7388,6 +7413,52 @@ document.getElementById("fsResClose").onclick = () => document.getElementById("f
 document.getElementById("fsResFade").onchange = e => { try { localStorage.setItem("fs-fade", e.target.checked ? "1" : "0"); } catch (er) {} if (fsRegister) fsRenderClients(); };
 document.getElementById("fsResIso").onchange = e => { try { localStorage.setItem("fs-isogate", e.target.checked ? "1" : "0"); } catch (er) {} };
 document.getElementById("fsResBatt").onclick = () => openBattCalc();
+/* ---------- Settings (V1.1): theme, backups, colour-coding, name, updates, device wipe ---------- */
+document.getElementById("fsSettingsBtn").onclick = () => {
+  document.getElementById("fsResFade").checked = fsFadeOn();
+  try { document.getElementById("fsSetName").value = localStorage.getItem("fs-user") || ""; } catch (e) {}
+  const vb = document.getElementById("fsVerBadge");
+  document.getElementById("fsSetVer").textContent = vb ? vb.textContent : "";
+  document.getElementById("fsSettingsModal").classList.add("show");
+};
+document.getElementById("fsSetClose").onclick = () => document.getElementById("fsSettingsModal").classList.remove("show");
+document.getElementById("fsSetName").addEventListener("change", e => {
+  try { localStorage.setItem("fs-user", e.target.value.trim()); } catch (er) {}
+});
+document.getElementById("fsSetUpd").onclick = async () => {
+  const btn = document.getElementById("fsSetUpd");
+  if (!("serviceWorker" in navigator) || location.protocol !== "https:") { alert("Update checks only apply to the installed/online app."); return; }
+  btn.textContent = "Checking\u2026";
+  const done = msg => { btn.innerHTML = "&#8635; Check for updates"; if (msg) alert(msg); };
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) { done("Couldn't check right now \u2014 try again with internet."); return; }
+    let found = false;
+    reg.addEventListener("updatefound", () => {
+      found = true;
+      const nw = reg.installing;
+      if (nw) nw.addEventListener("statechange", () => {
+        if (nw.state === "activated") { alert("Update installed \u2713 \u2014 reloading now."); location.reload(); }
+      });
+    });
+    await reg.update();
+    setTimeout(() => { if (!found) done("You're up to date \u2713 (" + document.getElementById("fsSetVer").textContent + ")"); }, 6000);
+  } catch (e) { done("Couldn't check right now \u2014 are you online?"); }
+};
+document.getElementById("fsSetWipe").onclick = async () => {
+  if (!confirm("Clear ALL cached data on THIS device?\n\nRemoves: cached register, backups, saved plans, planner data, PA recordings, library files and preferences.\nRegister and plan files saved on disk or OneDrive are NOT touched.\n\nYou'll need to reload your register file afterwards.")) return;
+  if (!confirm("Are you sure? This can't be undone on this device.")) return;
+  try { localStorage.clear(); } catch (e) {}
+  try {
+    await new Promise(res => {
+      const rq = indexedDB.deleteDatabase("bpm");
+      rq.onsuccess = res; rq.onerror = res; rq.onblocked = res;   // blocked = open connections; the reload below closes them and the delete completes
+      setTimeout(res, 2500);
+    });
+  } catch (e) {}
+  alert("Device data cleared \u2713 \u2014 the app will now reload.");
+  location.reload();
+};
 document.getElementById("fsLibAdd").onclick = () => document.getElementById("fsLibInput").click();
 document.getElementById("fsLibInput").addEventListener("change", e => {
   const f = e.target.files && e.target.files[0];
@@ -8378,7 +8449,7 @@ function fsPlPicker() {  // confirm/edit the month's to-do list before anything 
   Object.keys(((fsPlPlans[pvKey] || {}).days) || {}).forEach(dk2 => (fsPlPlans[pvKey].days[dk2] || []).forEach(x => { prevIds[x.siteId] = 1; }));
   const stars = fsPlStars(), lastTicks = fsPlLastTicks();
   let html = '<div class="fscard" style="padding:20px;max-width:540px;width:100%;max-height:88vh;overflow:auto">' +
-    '<h3 style="font-size:16.5px;font-weight:800;margin-bottom:2px">Plan ' + fsPlMonthName() + '</h3>' +
+    '<div style="display:flex;align-items:flex-start;gap:8px"><h3 style="font-size:16.5px;font-weight:800;margin-bottom:2px;flex:1">Plan ' + fsPlMonthName() + '</h3><a id="fsPlPickX2" title="Close" style="font-size:24px;line-height:1;cursor:pointer;color:var(--fs-sub2);padding:2px 8px">&#10005;</a></div>' +
     '<div style="font-size:12.5px;color:var(--fs-sub2);margin-bottom:8px">Pre-ticked: due this month, &#9733; My clients, or ticked last time. Tap a star to keep a site on your list. Tick/untick anything, then Plan.</div>' +
     '<input class="fsinput" id="fsPlPickSearch" placeholder="Search clients &amp; sites…" style="margin-bottom:6px;padding:9px">' +
     '<div style="display:flex;gap:8px;margin-bottom:6px"><button class="fsbtn" id="fsPlTickMine" style="flex:1;padding:7px">&#9733; My clients</button><button class="fsbtn" id="fsPlTickAll" style="flex:1;padding:7px">All</button><button class="fsbtn" id="fsPlTickNone" style="flex:1;padding:7px">None</button></div>' +
@@ -8405,6 +8476,7 @@ function fsPlPicker() {  // confirm/edit the month's to-do list before anything 
     d.querySelectorAll(".fsPlRow").forEach(row => { row.style.display = !q || row.dataset.txt.indexOf(q) >= 0 ? "flex" : "none"; });
   };
   d.querySelector("#fsPlPickX").onclick = () => d.remove();
+  d.querySelector("#fsPlPickX2").onclick = () => d.remove();
   d.querySelectorAll(".fsPlStar").forEach(a => a.onclick = ev => {
     ev.preventDefault(); ev.stopPropagation();   // the row is a <label> - don't toggle the tick
     const arr = fsPlStars(), id = a.dataset.id, ix = arr.indexOf(id);
