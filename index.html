@@ -161,7 +161,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span style="font-size:11px;color:#7c8a91">register v1.1 (fs 0.29)</span>
+      <span style="font-size:11px;color:#7c8a91">register v1.2 (fs 1.0)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsThemeBtn" title="Light / dark">&#127765;</button>
@@ -170,6 +170,7 @@
       <button class="fsbtn" id="fsResBtn" title="Resources — tools &amp; library">&#128218; Resources</button>
       <button class="fsbtn" id="fsBackupsBtn" title="Register backups kept on this device">&#128336;</button>
       <button class="fsbtn" id="fsPlannerBtn" style="display:none" title="Monthly planner + day routes">&#128197; Planner</button>
+      <button class="fsbtn" id="fsDashBtn" style="display:none" title="All-sites overview (admin passcode)">&#128202; Dashboard</button>
       <button class="fsbtn" id="fsExportReg" style="display:none">&#128190; Export register</button>
     </div>
     <div id="fsRegStamp" style="font-size:11.5px;color:#7c8a91;margin-bottom:16px"></div>
@@ -199,6 +200,7 @@
 
     <div id="fsSiteView" style="display:none"></div>
     <div id="fsPlannerView" style="display:none"></div>
+    <div id="fsDashView" style="display:none"></div>
     <input type="file" id="fsPhotoInput" accept="image/*" multiple style="display:none">
     <div id="fsLightbox" style="display:none;position:fixed;inset:0;z-index:210;background:rgba(10,14,16,.93);overflow:auto;text-align:center;cursor:zoom-out">
       <div style="position:sticky;top:0;display:flex;justify-content:flex-end;gap:8px;padding:10px;z-index:1">
@@ -506,14 +508,28 @@
     <h3 style="margin-bottom:10px">Resources</h3>
     <div style="font-weight:700;font-size:13px;color:#7ddb8f;margin-bottom:6px">TOOLS</div>
     <button class="btn" id="fsResBatt" style="width:100%;text-align:left;margin-bottom:8px">&#128267; Battery calculator (AS 1851 App F)</button>
+    <button class="btn" id="fsResPa" style="width:100%;text-align:left;margin-bottom:8px">&#128226; PA announcements &mdash; record &amp; play</button>
     <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;margin-bottom:6px;cursor:pointer"><input type="checkbox" id="fsResFade"> Client list due-date colour fade</label>
-    <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;margin-bottom:14px;cursor:pointer"><input type="checkbox" id="fsResIso"> Isolation restore gate on tests</label>
+    <!-- isolation gate hidden for V1.0 - set display:flex (and restore fsIsoGateOn) to reinstate --><label style="display:none;align-items:center;gap:8px;font-size:13.5px;margin-bottom:14px;cursor:pointer"><input type="checkbox" id="fsResIso"> Isolation restore gate on tests</label>
     <div style="font-weight:700;font-size:13px;color:#7ddb8f;margin-bottom:6px">LIBRARY</div>
     <div style="font-size:12px;color:#999;margin-bottom:8px">Reference documents (standards, manuals). Stored on this device only &mdash; add them once per device.</div>
     <div id="fsLibList"></div>
     <button class="btn" id="fsLibAdd" style="margin-top:8px">&#65291; Add file to library</button>
     <input type="file" id="fsLibInput" accept="application/pdf,.pdf" style="display:none">
     <div class="row" style="margin-top:14px"><button class="btn" id="fsResClose">Close</button></div>
+  </div>
+</div>
+<div class="modal" id="fsPaModal" style="z-index:121">
+  <div class="modalbox" style="max-width:470px;width:94vw;max-height:82vh;overflow-y:auto;text-align:left">
+    <h3 style="margin-bottom:6px">&#128226; PA announcements</h3>
+    <div style="font-size:12px;color:#999;margin-bottom:10px">Play a pre-recorded announcement over the PA / intercom before testing. Stored on this device only &mdash; never saved into the register or included in any export.</div>
+    <div id="fsPaList"></div>
+    <div class="row" style="margin-top:12px;flex-wrap:wrap;gap:8px">
+      <button class="btn" id="fsPaRec">&#127908; Record</button>
+      <button class="btn" id="fsPaAdd">&#65291; Add audio file</button>
+      <button class="btn" id="fsPaClose">Close</button>
+    </div>
+    <input type="file" id="fsPaInput" accept="audio/*" style="display:none">
   </div>
 </div>
 <div class="modal" id="fsBattModal" style="z-index:121">
@@ -3371,17 +3387,43 @@ function isMobileShare() {
 function canShareFile(file) {
   return isMobileShare() && navigator.canShare && navigator.canShare({ files: [file] });
 }
-function deliverFile(blob, name, mime) {
-  const file = new File([blob], name, { type: mime });
-  if (canShareFile(file)) {
-    navigator.share({ files: [file] }).catch(() => {});   // no title: iOS saves it as a stray .txt beside the file
-    return;
-  }
+function dlAnchor(blob, name) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+function deliverFile(blob, name, mime) {
+  const file = new File([blob], name, { type: mime });
+  if (canShareFile(file)) {
+    // no title: iOS saves it as a stray .txt beside the file. If iOS blocks the share
+    // sheet (stale tap after a dialog), fall back to a plain download so the save is
+    // never silently lost (iPad/iPhone Save As fix, V1.0)
+    navigator.share({ files: [file] }).catch(err => { if (!err || err.name !== "AbortError") dlAnchor(blob, name); });
+    return;
+  }
+  dlAnchor(blob, name);
+}
+function askFileName(def, cb) {
+  // in-page replacement for prompt(): the Save tap is a FRESH user gesture, so the
+  // share sheet that follows is allowed (a prompt() here was eating the gesture and
+  // iOS silently refused to open the share sheet -> "Save As does nothing")
+  const d = document.createElement("div");
+  d.style.cssText = "position:fixed;inset:0;z-index:400;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px";
+  d.innerHTML = '<div style="background:#23272d;color:#eee;border-radius:12px;padding:18px 18px 14px;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,.5)">' +
+    '<div style="font-weight:700;margin-bottom:8px;font-size:15px">File name</div>' +
+    '<input id="askNmIn" autocomplete="off" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #4a5057;background:#1a1d21;color:#eee;font-size:15px">' +
+    '<div style="display:flex;gap:8px;margin-top:12px">' +
+    '<button id="askNmX" style="flex:1;padding:10px;border-radius:8px;border:1px solid #4a5057;background:#2c3138;color:#ddd;font-size:14px">Cancel</button>' +
+    '<button id="askNmGo" style="flex:2;padding:10px;border-radius:8px;border:0;background:#0e7c8c;color:#fff;font-weight:700;font-size:14px">Save</button></div></div>';
+  document.body.appendChild(d);
+  const inp = d.querySelector("#askNmIn");
+  inp.value = def || "";
+  try { inp.focus(); inp.setSelectionRange(0, inp.value.replace(/\.[a-z0-9]+$/i, "").length); } catch (e) {}
+  d.querySelector("#askNmX").onclick = () => d.remove();
+  d.querySelector("#askNmGo").onclick = () => { const nm = inp.value.trim() || def; d.remove(); cb(nm); };
+  inp.onkeydown = ev => { if (ev.key === "Enter") d.querySelector("#askNmGo").onclick(); };
 }
 
 function projectBlob() {
@@ -3431,13 +3473,13 @@ async function saveProject() {
       }
     }
   }
-  // iPad / share-sheet path: let the user name the file (share sheet offers no rename)
-  let nm = prompt("File name for the project:", name);
-  if (nm === null) return;
-  nm = nm.trim() || name;
-  if (!/\.json$/i.test(nm)) nm += ".json";
-  deliverFile(projectBlob(), nm, "application/json");
-  noteSaved("Exported");
+  // iPad / share-sheet path: in-page name box - its Save tap is the fresh gesture the
+  // iOS share sheet needs (prompt() here made Save As silently do nothing on iPad/iPhone)
+  askFileName(name, nm => {
+    if (!/\.json$/i.test(nm)) nm += ".json";
+    deliverFile(projectBlob(), nm, "application/json");
+    noteSaved("Exported");
+  });
 }
 document.getElementById("btnSaveProj").onclick = saveProject;
 document.getElementById("btnSaveAs").onclick = () => { fileHandle = null; saveProject(); };
@@ -5745,7 +5787,7 @@ function fsProfileFromFile(obj) {
 }
 
 function fsShow(view) {
-  ["fsImportView", "fsClientsView", "fsSitesView", "fsSiteView", "fsPlannerView"].forEach(id =>
+  ["fsImportView", "fsClientsView", "fsSitesView", "fsSiteView", "fsPlannerView", "fsDashView"].forEach(id =>
     document.getElementById(id).style.display = id === view ? "block" : "none");
 }
 function fsEsc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
@@ -5766,6 +5808,105 @@ function fsEnsureIds() {
 }
 
 function fsMarkDirty() { fsDirty = true; fsStamp(); idbPut("fsRegister", fsRegister).catch(() => {}); }
+/* ---------- Portfolio dashboard: all-sites management view behind an admin passcode.
+   The passcode hash lives IN the register file (register.adminPin) so it travels to
+   colleagues' copies. Forgot it? Delete the "adminPin" entry from the register json. ---------- */
+let fsDashUnlocked = false;
+async function fsSha256(t) {
+  const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(t)));
+  return Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2, "0")).join("");
+}
+document.getElementById("fsDashBtn").onclick = async () => {
+  if (!fsRegister) return;
+  if (!fsRegister.adminPin) {
+    if (!confirm("No admin passcode is set for this register yet.\nThe dashboard is an all-sites management view \u2014 set a passcode now?")) return;
+    const p1 = prompt("Choose an admin passcode (4+ characters):") || "";
+    if (p1.length < 4) { if (p1) alert("Too short \u2014 passcode not set."); return; }
+    const p2 = prompt("Re-enter the passcode:") || "";
+    if (p1 !== p2) { alert("They didn't match \u2014 passcode not set."); return; }
+    fsRegister.adminPin = await fsSha256(p1);
+    fsMarkDirty();
+    alert("Passcode set \u2713 \u2014 Save the register so colleagues' copies use the same one.");
+    fsDashUnlocked = true;
+  } else if (!fsDashUnlocked) {
+    const p = prompt("Admin passcode:");
+    if (p === null) return;
+    if (await fsSha256(p) !== fsRegister.adminPin) { alert("Wrong passcode."); return; }
+    fsDashUnlocked = true;
+  }
+  fsDashRender();
+  fsShow("fsDashView");
+};
+function fsDashRows() {
+  const rows = [];
+  (fsRegister.clients || []).forEach(c => (c.sites || []).forEach(s => {
+    let worstDays = null, openDef = 0, lastTest = "";
+    const walk = s2 => {
+      FS_CYCLES.forEach(cy => {
+        const t = (s2.testing || {})[cy.key];
+        if (!t) return;
+        const last = new Date(t);
+        if (isNaN(last)) return;
+        const due = new Date(last); due.setMonth(due.getMonth() + cy.months);
+        const d = Math.floor((due - Date.now()) / 86400000);
+        if (worstDays === null || d < worstDays) worstDays = d;
+      });
+      (s2.defects || []).forEach(df => { if (!df.closed) openDef++; });
+      const f0 = ((s2.history || [])[0] || {}).finished;
+      if (f0 && (!lastTest || f0 > lastTest)) lastTest = f0;
+      (s2.buildings || []).forEach(walk);
+    };
+    walk(s);
+    rows.push({ c: c, s: s, days: worstDays, def: openDef, last: (lastTest || "").slice(0, 10) });
+  }));
+  rows.sort((a, b) => (a.days === null ? 1e9 : a.days) - (b.days === null ? 1e9 : b.days));
+  return rows;
+}
+function fsDashRender() {
+  const wrap = document.getElementById("fsDashView");
+  const rows = fsDashRows();
+  const over = rows.filter(r => r.days !== null && r.days < 0).length;
+  const soon = rows.filter(r => r.days !== null && r.days >= 0 && r.days <= 30).length;
+  const defs = rows.reduce((a, r) => a + r.def, 0);
+  let html = '<div style="margin-bottom:12px"><a id="fsDashBack" style="color:var(--fs-accent);font-weight:700;cursor:pointer;font-size:15px">&#8592; Clients</a></div>';
+  html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px"><h2 style="font-size:20px;flex:1;min-width:150px">&#128202; Portfolio dashboard</h2>' +
+    '<button class="fsbtn" id="fsDashPdf">&#128196; PDF</button></div>';
+  const chip = (n, lbl, col) => '<div class="fscard" style="flex:1;min-width:110px;padding:12px;text-align:center"><div style="font-size:24px;font-weight:800;color:' + col + '">' + n + '</div><div style="font-size:11.5px;color:var(--fs-sub2)">' + lbl + '</div></div>';
+  html += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">' + chip(over, "Overdue", over ? "#c62828" : "#1b8a3f") + chip(soon, "Due within 30 days", soon ? "#b58900" : "#1b8a3f") + chip(defs, "Open defects", defs ? "#c62828" : "#1b8a3f") + '</div>';
+  html += '<div class="fscard" style="padding:4px 14px">';
+  rows.forEach((r, i) => {
+    const cyc = FS_CYCLES.map(cy => { const st = fsCycleStatus(r.s, cy); return st.txt === "No record" ? "" : '<span style="font-size:11px;color:' + st.col + ';font-weight:700;white-space:nowrap">' + cy.label + ": " + st.txt + '</span>'; }).filter(Boolean).join(' <span style="color:var(--fs-border)">|</span> ');
+    html += '<div class="fsDashRow" data-i="' + i + '" style="display:flex;gap:10px;align-items:center;padding:9px 0;' + (i ? 'border-top:1px solid var(--fs-border);' : '') + 'cursor:pointer">' +
+      '<span style="width:10px;height:10px;border-radius:50%;flex:none;background:' + fsSiteWorstDot(r.s) + '"></span>' +
+      '<span style="flex:1;min-width:0"><b style="font-size:14px">' + fsEsc(r.s.name) + '</b> <span style="font-size:12px;color:var(--fs-sub2)">' + fsEsc(r.c.name) + '</span><br>' +
+      '<span>' + (cyc || '<span style="font-size:11px;color:var(--fs-sub2)">No tests recorded</span>') + '</span></span>' +
+      (r.def ? '<span style="font-size:11.5px;font-weight:800;color:#fff;background:#c62828;border-radius:12px;padding:2px 9px;flex:none">' + r.def + ' defect' + (r.def === 1 ? '' : 's') + '</span>' : '') + '</div>';
+  });
+  html += '</div>';
+  wrap.innerHTML = html;
+  document.getElementById("fsDashBack").onclick = () => fsShow("fsClientsView");
+  document.getElementById("fsDashPdf").onclick = fsDashPdf;
+  wrap.querySelectorAll(".fsDashRow").forEach(el => el.onclick = () => {
+    const r = rows[+el.dataset.i];
+    if (!r) return;
+    fsClient = r.c; fsParentSite = null; fsSite = r.s; fsTab = "overview"; fsInfoEdit = false; fsEquipEdit = false;
+    fsRenderSite(); fsShow("fsSiteView");
+  });
+}
+function fsDashPdf() {
+  const rows = fsDashRows();
+  const over = rows.filter(r => r.days !== null && r.days < 0).length;
+  const defs = rows.reduce((a, r) => a + r.def, 0);
+  const lines = [["h", "Portfolio overview \u2014 " + new Date().toISOString().slice(0, 10)]];
+  lines.push(["t", rows.length + " sites \u00b7 " + over + " overdue \u00b7 " + defs + " open defects"]);
+  rows.forEach(r => {
+    lines.push(["b", r.s.name + "  (" + r.c.name + ")"]);
+    FS_CYCLES.forEach(cy => { const st = fsCycleStatus(r.s, cy); if (st.txt !== "No record") lines.push([st.overdue ? "f" : "t", "  " + cy.label + ": " + st.txt]); });
+    if (r.def) lines.push(["f", "  Open defects: " + r.def]);
+    if (r.last) lines.push(["t", "  Last test finished: " + r.last]);
+  });
+  fsLinesPdf(lines, fsDocBrand() + " portfolio overview", "portfolio-" + new Date().toISOString().slice(0, 10) + ".pdf");
+}
 function fsStamp() {
   const el = document.getElementById("fsRegStamp");
   if (!fsRegister) { el.textContent = ""; return; }
@@ -5776,6 +5917,7 @@ function fsStamp() {
   const ex = document.getElementById("fsExportReg");
   ex.style.display = fsRegister ? "inline-block" : "none";
   document.getElementById("fsPlannerBtn").style.display = fsRegister ? "inline-block" : "none";
+  document.getElementById("fsDashBtn").style.display = fsRegister ? "inline-block" : "none";
   ex.innerHTML = "&#128190; " + ((typeof fsRegFileHandle !== "undefined" && fsRegFileHandle) ? "Save register" : "Export register");
   ex.title = "Saves the WHOLE register file \u2014 client data + company profile + test checklists in one. To share just the company setup, use Profile \u2192 Export profile.";
 }
@@ -6654,8 +6796,8 @@ document.getElementById("fsExportReg").onclick = async () => {
   fsRegister.updated = new Date().toISOString().slice(0, 10);
   fsRegister.savedBy = who;
   const json = JSON.stringify(fsRegister);
-  await fsBackupSnapshot("saved");
   if (fsRegFileHandle) {
+    await fsBackupSnapshot("saved");
     try {
       const w = await fsRegFileHandle.createWritable();
       await w.write(json);
@@ -6669,7 +6811,8 @@ document.getElementById("fsExportReg").onclick = async () => {
   fsDirty = false;
   fsStamp();
   deliverFile(new Blob([json], { type:"application/json" }),
-    "firespark-register-" + fsRegister.updated + ".json", "application/json");
+    "firespark-register-" + fsRegister.updated + ".json", "application/json");   // deliver inside the tap (iOS share needs the fresh gesture), THEN back up
+  fsBackupSnapshot("saved");
 };
 document.getElementById("fsThemeBtn").onclick = () => {
   const reg = document.getElementById("fsReg");
@@ -6833,7 +6976,7 @@ function fsIsoLines() {
   const s2 = (typeof fsSite !== "undefined" && fsSite) || {};
   return String(s2.isolations || "").split("\n").map(x => x.trim()).filter(Boolean);
 }
-function fsIsoGateOn() { try { return localStorage.getItem("fs-isogate") !== "0"; } catch (e) { return true; } }
+function fsIsoGateOn() { return false; }   // hidden for V1.0 (Reece 19 Jul 2026). To reinstate: return localStorage.getItem("fs-isogate") !== "0" (and un-hide the Resources checkbox)
 function fsSessKey() { return "fs-session:" + (fsSiteCtx ? fsSiteCtx.siteId : "nosite"); }
 function fsSaveSession() { try { localStorage.setItem(fsSessKey(), JSON.stringify(fsSession)); } catch (e) {} fsTestBtnRefresh(); }
 function fsClearSession() { fsSession = null; try { localStorage.removeItem(fsSessKey()); } catch (e) {} fsTestBtnRefresh(); }
@@ -7259,6 +7402,103 @@ document.getElementById("fsLibInput").addEventListener("change", e => {
   };
   rd.readAsDataURL(f);
 });
+/* ---------- PA announcements: device-local audio (IDB), NEVER in the register/exports ---------- */
+let fsPaAudio = null, fsPaPlaying = -1, fsPaRecorder = null, fsPaTimer = null;
+async function fsPaGet() { try { return (await idbGet("fsPaLib")) || []; } catch (e) { return []; } }
+function fsPaStop() {
+  if (fsPaAudio) { try { fsPaAudio.pause(); } catch (e) {} fsPaAudio = null; }
+  fsPaPlaying = -1;
+}
+async function fsPaRender() {
+  const list = await fsPaGet();
+  const box = document.getElementById("fsPaList");
+  if (!list.length) { box.innerHTML = '<div style="font-size:13px;color:#777">Nothing here yet \u2014 record one, or add an audio file (e.g. one made with a voice generator).</div>'; return; }
+  box.innerHTML = list.map((f, i) =>
+    '<div style="display:flex;gap:8px;align-items:center;border-bottom:1px solid #33383f;padding:7px 0">' +
+    '<button class="btn fsPaPlay" data-i="' + i + '" style="padding:6px 12px;min-width:46px">' + (fsPaPlaying === i ? "&#9632;" : "&#9654;") + '</button>' +
+    '<span style="flex:1;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + fsEsc(f.name) + '</span>' +
+    '<span style="font-size:11px;color:#777">' + Math.round((f.data || "").length * 0.75 / 1024) + ' KB</span>' +
+    '<a class="fsPaDel" data-i="' + i + '" style="color:#c62828;cursor:pointer;padding:2px 6px">&#10005;</a></div>').join("");
+  box.querySelectorAll(".fsPaPlay").forEach(b => b.onclick = async () => {
+    const i = +b.dataset.i;
+    if (fsPaPlaying === i) { fsPaStop(); fsPaRender(); return; }
+    fsPaStop();
+    const f = (await fsPaGet())[i];
+    if (!f) return;
+    fsPaAudio = new Audio(f.data);
+    fsPaAudio.onended = () => { fsPaPlaying = -1; fsPaRender(); };
+    fsPaAudio.play().catch(() => alert("Couldn't play that file on this device."));
+    fsPaPlaying = i;
+    fsPaRender();
+  });
+  box.querySelectorAll(".fsPaDel").forEach(a => a.onclick = async () => {
+    const list2 = await fsPaGet();
+    if (!confirm('Remove "' + ((list2[+a.dataset.i] || {}).name || "this recording") + '" from this device?')) return;
+    fsPaStop();
+    list2.splice(+a.dataset.i, 1);
+    await idbPut("fsPaLib", list2);
+    fsPaRender();
+  });
+}
+function fsPaSaveBlob(blob, defName) {
+  const rd2 = new FileReader();
+  rd2.onload = async () => {
+    const list = await fsPaGet();
+    list.push({ name: defName, type: blob.type, data: rd2.result, t: Date.now() });
+    try { await idbPut("fsPaLib", list); } catch (err) { alert("Couldn't store that recording (device storage full?)"); return; }
+    fsPaRender();
+  };
+  rd2.readAsDataURL(blob);
+}
+function fsPaStopRec(silent) {
+  if (fsPaRecorder && fsPaRecorder.state !== "inactive") { fsPaRecorder._silent = !!silent; fsPaRecorder.stop(); }
+  if (fsPaTimer) { clearInterval(fsPaTimer); fsPaTimer = null; }
+}
+document.getElementById("fsResPa").onclick = () => {
+  document.getElementById("fsResModal").classList.remove("show");
+  fsPaRender();
+  document.getElementById("fsPaModal").classList.add("show");
+};
+document.getElementById("fsPaClose").onclick = () => { fsPaStop(); fsPaStopRec(true); document.getElementById("fsPaModal").classList.remove("show"); };
+document.getElementById("fsPaAdd").onclick = () => document.getElementById("fsPaInput").click();
+document.getElementById("fsPaInput").addEventListener("change", e => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  fsPaSaveBlob(f, f.name);
+});
+document.getElementById("fsPaRec").onclick = async () => {
+  const btn = document.getElementById("fsPaRec");
+  if (fsPaRecorder && fsPaRecorder.state === "recording") { fsPaStopRec(false); return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { alert("Microphone not available \u2014 check the app has mic permission in your device settings."); return; }
+  const mt = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"].find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || "";
+  let rec;
+  try { rec = new MediaRecorder(stream, mt ? { mimeType: mt } : undefined); }
+  catch (e) { stream.getTracks().forEach(t => t.stop()); alert("Recording isn't supported on this device/browser."); return; }
+  const chunks = [];
+  rec.ondataavailable = ev => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+  rec.onstop = () => {
+    stream.getTracks().forEach(t => t.stop());
+    btn.innerHTML = "&#127908; Record";
+    if (fsPaTimer) { clearInterval(fsPaTimer); fsPaTimer = null; }
+    const silent = rec._silent;
+    fsPaRecorder = null;
+    if (silent || !chunks.length) return;
+    const blob = new Blob(chunks, { type: rec.mimeType || mt || "audio/mp4" });
+    const ext = /mp4/.test(blob.type) ? ".m4a" : ".webm";
+    askFileName("announcement" + ext, nm => fsPaSaveBlob(blob, nm));
+  };
+  fsPaRecorder = rec;
+  rec.start();
+  const t0 = Date.now();
+  btn.innerHTML = "&#9632; Stop 0:00";
+  fsPaTimer = setInterval(() => {
+    const s = Math.floor((Date.now() - t0) / 1000);
+    btn.innerHTML = "&#9632; Stop " + Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+  }, 500);
+};
 function openBattCalc() {
   document.getElementById("fsBattModal").classList.add("show");
   battCalc();
@@ -7838,6 +8078,11 @@ function fsPlLoadSettings() {
 function fsPlSaveSettings() { localStorage.setItem("fs-planner", JSON.stringify(fsPlSettings)); }
 async function fsPlLoadPlans() { if (fsPlPlans) return; try { fsPlPlans = (await idbGet("fsPlans")) || {}; } catch (e) { fsPlPlans = {}; } }
 function fsPlSavePlans() { idbPut("fsPlans", fsPlPlans).catch(function () {}); }
+function fsPlStars() { try { return JSON.parse(localStorage.getItem("fs-plstars") || "[]"); } catch (e) { return []; } }
+function fsPlSaveStars(a) { try { localStorage.setItem("fs-plstars", JSON.stringify(a)); } catch (e) {} }
+function fsPlLastTicks() { try { return JSON.parse(localStorage.getItem("fs-plticks") || "[]"); } catch (e) { return []; } }
+function fsPlTodayKey() { const t = new Date(); return t.getFullYear() + "-" + String(t.getMonth() + 1).padStart(2, "0") + "-" + String(t.getDate()).padStart(2, "0"); }
+function fsPlFromDef() { const tk = fsPlTodayKey(); return tk.slice(0, 7) === fsPlMonth ? tk : fsPlMonth + "-01"; }   // plan from TODAY when planning the current month
 function fsPlMonthObj() { fsPlPlans[fsPlMonth] = fsPlPlans[fsPlMonth] || { days: {}, locked: {}, tray: [] }; return fsPlPlans[fsPlMonth]; }
 
 function fsPlSites() {  // top-level sites only (buildings share the site address)
@@ -8131,12 +8376,14 @@ function fsPlPicker() {  // confirm/edit the month's to-do list before anything 
   const pvKey = pv.getFullYear() + "-" + String(pv.getMonth() + 1).padStart(2, "0");
   const prevIds = {};
   Object.keys(((fsPlPlans[pvKey] || {}).days) || {}).forEach(dk2 => (fsPlPlans[pvKey].days[dk2] || []).forEach(x => { prevIds[x.siteId] = 1; }));
+  const stars = fsPlStars(), lastTicks = fsPlLastTicks();
   let html = '<div class="fscard" style="padding:20px;max-width:540px;width:100%;max-height:88vh;overflow:auto">' +
     '<h3 style="font-size:16.5px;font-weight:800;margin-bottom:2px">Plan ' + fsPlMonthName() + '</h3>' +
-    '<div style="font-size:12.5px;color:var(--fs-sub2);margin-bottom:8px">Pre-ticked: due this month (register test dates) or planned last month. Tick/untick anything, then Plan.</div>' +
+    '<div style="font-size:12.5px;color:var(--fs-sub2);margin-bottom:8px">Pre-ticked: due this month, &#9733; My clients, or ticked last time. Tap a star to keep a site on your list. Tick/untick anything, then Plan.</div>' +
     '<input class="fsinput" id="fsPlPickSearch" placeholder="Search clients &amp; sites…" style="margin-bottom:6px;padding:9px">' +
+    '<div style="display:flex;gap:8px;margin-bottom:6px"><button class="fsbtn" id="fsPlTickMine" style="flex:1;padding:7px">&#9733; My clients</button><button class="fsbtn" id="fsPlTickAll" style="flex:1;padding:7px">All</button><button class="fsbtn" id="fsPlTickNone" style="flex:1;padding:7px">None</button></div>' +
     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;font-size:12px;color:var(--fs-sub2)">Plan from' +
-    '<input class="fsinput" id="fsPlFrom" type="date" value="' + fsPlMonth + '-01" style="width:150px;padding:6px">to' +
+    '<input class="fsinput" id="fsPlFrom" type="date" value="' + fsPlFromDef() + '" style="width:150px;padding:6px">to' +
     '<input class="fsinput" id="fsPlTo" type="date" value="' + fsPlMonth + '-' + String(new Date(+fsPlMonth.slice(0, 4), +fsPlMonth.slice(5, 7), 0).getDate()).padStart(2, "0") + '" style="width:150px;padding:6px"></div>';
   fsPlSites().forEach(e => {
     const due = fsPlDueCycles(e.s, fsPlMonth);
@@ -8144,7 +8391,8 @@ function fsPlPicker() {  // confirm/edit the month's to-do list before anything 
     const mins = fsPlMinsFor(e.s, fsPlMonth);
     const pref = (e.s.visit && e.s.visit.pref) || "";
     html += '<label class="fsPlRow" data-txt="' + fsEsc((e.s.name + " " + e.c.name).toLowerCase()) + '" style="display:flex;gap:9px;align-items:center;border-top:1px solid var(--fs-border);padding:8px 0;cursor:pointer">' +
-      '<input type="checkbox" class="fsPlPick" data-id="' + fsEsc(e.s.id) + '"' + ((due.length || prevIds[e.s.id]) ? ' checked' : '') + ' style="width:18px;height:18px;accent-color:var(--fs-accent)">' +
+      '<input type="checkbox" class="fsPlPick" data-id="' + fsEsc(e.s.id) + '"' + ((due.length || prevIds[e.s.id] || stars.indexOf(e.s.id) >= 0 || lastTicks.indexOf(e.s.id) >= 0) ? ' checked' : '') + ' style="width:18px;height:18px;accent-color:var(--fs-accent)">' +
+      '<a class="fsPlStar" data-id="' + fsEsc(e.s.id) + '" title="My clients list" style="font-size:19px;line-height:1;cursor:pointer;color:' + (stars.indexOf(e.s.id) >= 0 ? '#e6a817' : 'var(--fs-faint)') + '">' + (stars.indexOf(e.s.id) >= 0 ? '&#9733;' : '&#9734;') + '</a>' +
       '<span style="flex:1;min-width:0"><b style="font-size:14px">' + fsEsc(e.s.name) + '</b> <span style="color:var(--fs-sub2);font-size:12px">' + fsEsc(e.c.name) + '</span><br>' +
       '<span style="font-size:11.5px;color:' + (due.length ? '#c62828' : 'var(--fs-faint)') + '">' + (due.length ? 'Due: ' + due.map(x => x.label).join(", ") : (rec ? 'planned last month' : 'nothing due')) + '</span>' +
       '<span style="font-size:11.5px;color:var(--fs-sub2)"> · ' + fsPlFmtMins(mins) + (pref ? ' · pref ' + fsEsc(pref) : '') + (e.s.geo ? '' : ' · ⚠ not located yet') + '</span></span></label>';
@@ -8157,8 +8405,20 @@ function fsPlPicker() {  // confirm/edit the month's to-do list before anything 
     d.querySelectorAll(".fsPlRow").forEach(row => { row.style.display = !q || row.dataset.txt.indexOf(q) >= 0 ? "flex" : "none"; });
   };
   d.querySelector("#fsPlPickX").onclick = () => d.remove();
+  d.querySelectorAll(".fsPlStar").forEach(a => a.onclick = ev => {
+    ev.preventDefault(); ev.stopPropagation();   // the row is a <label> - don't toggle the tick
+    const arr = fsPlStars(), id = a.dataset.id, ix = arr.indexOf(id);
+    if (ix >= 0) arr.splice(ix, 1); else arr.push(id);
+    fsPlSaveStars(arr);
+    a.style.color = ix >= 0 ? "var(--fs-faint)" : "#e6a817";
+    a.innerHTML = ix >= 0 ? "&#9734;" : "&#9733;";
+  });
+  d.querySelector("#fsPlTickMine").onclick = () => { const st2 = fsPlStars(); d.querySelectorAll(".fsPlPick").forEach(cb => { cb.checked = st2.indexOf(cb.dataset.id) >= 0; }); };
+  d.querySelector("#fsPlTickAll").onclick = () => d.querySelectorAll(".fsPlPick").forEach(cb => { cb.checked = true; });
+  d.querySelector("#fsPlTickNone").onclick = () => d.querySelectorAll(".fsPlPick").forEach(cb => { cb.checked = false; });
   d.querySelector("#fsPlPickGo").onclick = () => {
     const ids = [...d.querySelectorAll(".fsPlPick")].filter(cb => cb.checked).map(cb => cb.dataset.id);
+    try { localStorage.setItem("fs-plticks", JSON.stringify(ids)); } catch (e) {}   // remembered for next time
     const from = d.querySelector("#fsPlFrom").value, to = d.querySelector("#fsPlTo").value;
     d.remove();
     if (!ids.length) { alert("Nothing ticked - nothing to plan."); return; }
@@ -8213,6 +8473,146 @@ function fsPlPdf() {
   });
   fsLinesPdf(lines, fsDocBrand() + " month plan — " + fsPlMonthName(), "plan-" + fsPlMonth + ".pdf");
 }
+function fsPlExportMenu() {
+  const d = document.createElement("div");
+  d.style.cssText = "position:fixed;inset:0;z-index:250;background:rgba(10,14,16,.72);display:flex;align-items:center;justify-content:center;padding:16px";
+  d.innerHTML = '<div class="fscard" style="padding:20px;max-width:420px;width:100%">' +
+    '<h3 style="font-size:16px;font-weight:800;margin-bottom:10px">Export ' + fsPlMonthName() + '</h3>' +
+    '<button class="fsbtn" id="fsPlExGridP" style="width:100%;text-align:left;margin-bottom:8px;padding:11px">&#128197; Month calendar &mdash; PDF</button>' +
+    '<button class="fsbtn" id="fsPlExGridW" style="width:100%;text-align:left;margin-bottom:8px;padding:11px">&#128221; Month calendar &mdash; Word</button>' +
+    '<button class="fsbtn" id="fsPlExList" style="width:100%;text-align:left;margin-bottom:8px;padding:11px">&#128203; Day-by-day run sheet &mdash; PDF</button>' +
+    '<button class="fsbtn" id="fsPlExIcs" style="width:100%;text-align:left;margin-bottom:8px;padding:11px" title="Opens in Apple / Google / Samsung Calendar">&#128242; Add to phone calendar</button>' +
+    '<button class="fsbtn" id="fsPlExX" style="width:100%;padding:10px">Cancel</button></div>';
+  document.body.appendChild(d);
+  const go = fn => () => { d.remove(); fn(); };
+  d.querySelector("#fsPlExGridP").onclick = go(fsPlGridPdf);
+  d.querySelector("#fsPlExGridW").onclick = go(fsPlGridDoc);
+  d.querySelector("#fsPlExList").onclick = go(fsPlPdf);
+  d.querySelector("#fsPlExIcs").onclick = go(() => fsPlIcs(Object.keys(fsPlMonthObj().days).sort(), "plan-" + fsPlMonth + ".ics"));
+  d.querySelector("#fsPlExX").onclick = () => d.remove();
+}
+function fsPlGridWeeks() {   // Sunday-first week rows incl. grey spill days either side (matches Reece's Word layout)
+  const y = +fsPlMonth.slice(0, 4), m = +fsPlMonth.slice(5, 7);
+  const firstDow = new Date(y, m - 1, 1).getDay();
+  const dim = new Date(y, m, 0).getDate();
+  const cells = Math.ceil((firstDow + dim) / 7) * 7;
+  const weeks = [];
+  for (let i = 0; i < cells; i++) {
+    if (i % 7 === 0) weeks.push([]);
+    const dt = new Date(y, m - 1, i - firstDow + 1);
+    weeks[weeks.length - 1].push({
+      d: dt.getDate(), inM: dt.getMonth() === m - 1,
+      dk: dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0") + "-" + String(dt.getDate()).padStart(2, "0")
+    });
+  }
+  return weeks;
+}
+function fsPlGridStops(dk) {
+  const days = ((fsPlPlans[dk.slice(0, 7)] || {}).days) || {};
+  return (days[dk] || []).slice().sort((a, b) => a.start.localeCompare(b.start))
+    .map(x => { const e = fsPlById(x.siteId); return { t: x.start.replace(/^0/, ""), n: e ? e.s.name : x.siteId }; });
+}
+function fsPlGridPdf() {
+  if (!Object.keys(fsPlMonthObj().days).length) { alert("Nothing planned yet."); return; }
+  const weeks = fsPlGridWeeks();
+  const W = 1754, H = 1240, m = 50, headH = 64, dowH = 34;
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const x0 = m, gw = W - m * 2, cw = gw / 7;
+  const gy = m + headH + dowH, gh = H - gy - m, rh = gh / weeks.length;
+  const cx = c.getContext("2d");
+  cx.fillStyle = "#fff"; cx.fillRect(0, 0, W, H);
+  cx.fillStyle = "#000"; cx.font = "bold 40px system-ui, sans-serif"; cx.textBaseline = "top";
+  cx.fillText(fsPlMonthName(), m, m - 8);
+  cx.font = "bold 15px system-ui, sans-serif"; cx.fillStyle = "#444";
+  ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"].forEach((d2, i) => cx.fillText(d2, x0 + i * cw + 8, m + headH + 8));
+  cx.strokeStyle = "#999"; cx.lineWidth = 1.2;
+  weeks.forEach((wk, wi) => wk.forEach((cell, di) => {
+    const x = x0 + di * cw, yy = gy + wi * rh;
+    cx.strokeRect(x, yy, cw, rh);
+    cx.fillStyle = cell.inM ? "#000" : "#b5b5b5";
+    cx.font = "bold 17px system-ui, sans-serif";
+    cx.fillText(String(cell.d), x + 6, yy + 5);
+    if (!cell.inM) return;
+    const stops = fsPlGridStops(cell.dk);
+    cx.font = "14px system-ui, sans-serif";
+    let ty = yy + 28;
+    const maxL = Math.max(1, Math.floor((rh - 34) / 19));
+    stops.slice(0, maxL).forEach((s2, si) => {
+      if (si === maxL - 1 && stops.length > maxL) { cx.fillStyle = "#666"; cx.fillText("+ " + (stops.length - maxL + 1) + " more", x + 6, ty); return; }
+      cx.fillStyle = "#222";
+      let txt = s2.t + " " + s2.n;
+      while (cx.measureText(txt).width > cw - 12 && txt.length > 4) txt = txt.slice(0, -1);
+      cx.fillText(txt, x + 6, ty);
+      ty += 19;
+    });
+  }));
+  cx.fillStyle = "#888"; cx.font = "14px system-ui, sans-serif";
+  cx.fillText(fsDocBrand() + " planner \u2014 exported " + new Date().toISOString().slice(0, 10), m, H - 34);
+  deliverFile(canvasToPdfBlob(c), "plan-calendar-" + fsPlMonth + ".pdf", "application/pdf");
+}
+/* minimal .docx writer: a docx is a zip of XML parts - built by hand (stored entries + CRC32), no libraries */
+const FS_CRC_T = (() => { const t = []; for (let n = 0; n < 256; n++) { let c2 = n; for (let k = 0; k < 8; k++) c2 = c2 & 1 ? 0xEDB88320 ^ (c2 >>> 1) : c2 >>> 1; t[n] = c2 >>> 0; } return t; })();
+function fsCrc32(u8) { let c2 = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c2 = FS_CRC_T[(c2 ^ u8[i]) & 0xFF] ^ (c2 >>> 8); return (c2 ^ 0xFFFFFFFF) >>> 0; }
+function fsZip(files) {
+  const enc = new TextEncoder(), parts = [], cd = [];
+  let off = 0;
+  files.forEach(f => {
+    const nm = enc.encode(f.n), data = enc.encode(f.d), crc = fsCrc32(data);
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true);
+    h.setUint32(14, crc, true); h.setUint32(18, data.length, true); h.setUint32(22, data.length, true);
+    h.setUint16(26, nm.length, true);
+    cd.push({ nm: nm, crc: crc, sz: data.length, off: off });
+    parts.push(new Uint8Array(h.buffer), nm, data);
+    off += 30 + nm.length + data.length;
+  });
+  let cdSz = 0;
+  cd.forEach(e => {
+    const h = new DataView(new ArrayBuffer(46));
+    h.setUint32(0, 0x02014b50, true); h.setUint16(4, 20, true); h.setUint16(6, 20, true);
+    h.setUint32(16, e.crc, true); h.setUint32(20, e.sz, true); h.setUint32(24, e.sz, true);
+    h.setUint16(28, e.nm.length, true); h.setUint32(42, e.off, true);
+    parts.push(new Uint8Array(h.buffer), e.nm);
+    cdSz += 46 + e.nm.length;
+  });
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true);
+  end.setUint16(8, cd.length, true); end.setUint16(10, cd.length, true);
+  end.setUint32(12, cdSz, true); end.setUint32(16, off, true);
+  parts.push(new Uint8Array(end.buffer));
+  return new Blob(parts, { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+}
+function fsXml(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+function fsDocxBlob(bodyXml) {
+  return fsZip([
+    { n: "[Content_Types].xml", d: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>' },
+    { n: "_rels/.rels", d: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>' },
+    { n: "word/document.xml", d: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' + bodyXml + '<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr></w:body></w:document>' }
+  ]);
+}
+function fsPlGridDoc() {
+  if (!Object.keys(fsPlMonthObj().days).length) { alert("Nothing planned yet."); return; }
+  const weeks = fsPlGridWeeks();
+  const cw = 2199;   // 7 equal columns across landscape A4 with 1.27cm margins
+  const P = (txt, o) => '<w:p><w:pPr><w:spacing w:before="0" w:after="' + ((o && o.after) || 0) + '"/></w:pPr><w:r><w:rPr>' +
+    ((o && o.b) ? '<w:b/>' : '') + ((o && o.col) ? '<w:color w:val="' + o.col + '"/>' : '') +
+    '<w:sz w:val="' + ((o && o.sz) || 18) + '"/></w:rPr><w:t xml:space="preserve">' + fsXml(txt) + '</w:t></w:r></w:p>';
+  let xml = P(fsPlMonthName(), { b: 1, sz: 48, after: 160 });
+  xml += '<w:tbl><w:tblPr><w:tblLayout w:type="fixed"/><w:tblBorders>' +
+    ["top", "left", "bottom", "right", "insideH", "insideV"].map(k => '<w:' + k + ' w:val="single" w:sz="6" w:color="808080"/>').join("") +
+    '</w:tblBorders></w:tblPr><w:tblGrid>' + ('<w:gridCol w:w="' + cw + '"/>').repeat(7) + '</w:tblGrid>';
+  xml += '<w:tr>' + ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"].map(d2 =>
+    '<w:tc><w:tcPr><w:tcW w:w="' + cw + '" w:type="dxa"/></w:tcPr>' + P(d2, { b: 1, sz: 17, col: "444444" }) + '</w:tc>').join("") + '</w:tr>';
+  weeks.forEach(wk => {
+    xml += '<w:tr><w:trPr><w:trHeight w:val="1500" w:hRule="atLeast"/></w:trPr>' + wk.map(cell => {
+      let cellXml = P(String(cell.d), { b: 1, sz: 19, col: cell.inM ? "000000" : "B5B5B5" });
+      if (cell.inM) fsPlGridStops(cell.dk).forEach(s2 => { cellXml += P(s2.t + " " + s2.n, { sz: 17, after: 40 }); });
+      return '<w:tc><w:tcPr><w:tcW w:w="' + cw + '" w:type="dxa"/></w:tcPr>' + cellXml + '</w:tc>';
+    }).join("") + '</w:tr>';
+  });
+  xml += '</w:tbl>' + P(fsDocBrand() + " planner \u2014 exported " + new Date().toISOString().slice(0, 10), { sz: 15, col: "888888" });
+  deliverFile(fsDocxBlob(xml), "plan-calendar-" + fsPlMonth + ".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+}
 function fsPlNav(s) {
   // navigate by ADDRESS when we have one - maps apps resolve street addresses to the exact
   // building, whereas our geocoded coords can sit on the road segment (Reece: wrong site)
@@ -8258,8 +8658,7 @@ function fsPlRender() {
     '<button class="fsbtn" id="fsPlPrev">&#8249;</button><button class="fsbtn" id="fsPlNext">&#8250;</button>' +
     '<button class="fsbtnP" id="fsPlGo">&#9889; Plan month</button>' +
     '<button class="fsbtn" id="fsPlCfg" title="Working hours, base, buffer">&#9881;</button>' +
-    '<button class="fsbtn" id="fsPlPdfBtn">&#128196; PDF</button>' +
-    '<button class="fsbtn" id="fsPlIcsBtn" title="Export the month to your phone calendar">&#128229; .ics</button></div>';
+    '<button class="fsbtn" id="fsPlExpBtn" title="Calendar &amp; run sheet exports">&#128228; Export</button></div>';
   html += '<div style="font-size:11.5px;color:var(--fs-faint);margin-bottom:10px">' + tvNote + '</div>';
 
   if (fsPlShowSettings) {
@@ -8324,8 +8723,7 @@ function fsPlRender() {
   document.getElementById("fsPlNext").onclick = () => { fsPlShiftMonth(1); };
   document.getElementById("fsPlGo").onclick = fsPlPlanClick;
   document.getElementById("fsPlCfg").onclick = () => { fsPlShowSettings = !fsPlShowSettings; fsPlRender(); };
-  document.getElementById("fsPlPdfBtn").onclick = fsPlPdf;
-  document.getElementById("fsPlIcsBtn").onclick = () => fsPlIcs(Object.keys(fsPlMonthObj().days).sort(), "plan-" + fsPlMonth + ".ics");
+  document.getElementById("fsPlExpBtn").onclick = fsPlExportMenu;
   const updT = document.getElementById("fsPlUpdT");
   if (updT) updT.onclick = () => fsPlUpdateTravel(false);
   const reloc = document.getElementById("fsPlRelocate");
@@ -8361,7 +8759,7 @@ function fsPlDayHtml(dk) {
   let html = '<div class="fscard" style="padding:16px;margin-top:12px">';
   html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px"><h3 style="font-size:16px;font-weight:800;flex:1">' + dt.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }) + '</h3>' +
     '<button class="fsbtn fsPlLock">' + (mo.locked[dk] ? '&#128274; Locked' : '&#128275; Lock day') + '</button>' +
-    '<button class="fsbtn fsPlDayIcs">&#128229; Day .ics</button></div>';
+    '<button class="fsbtn fsPlDayIcs" title="Opens in Apple / Google / Samsung Calendar">&#128242; Add day to phone calendar</button></div>';
   if (!stops.length) html += '<div style="color:var(--fs-faint);font-size:13px">No stops planned this day.</div>';
   let prev = null;
   stops.forEach((x, i) => {
