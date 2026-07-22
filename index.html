@@ -166,7 +166,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.10 (fs 1.8)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.10.1 (fs 1.8.1)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -379,7 +379,7 @@
         <option value="vl">Vaporising Liquid &mdash; yellow band</option>
         <option value="foam">Foam &mdash; blue band</option>
         <option value="dcp">Dry Chemical Powder &mdash; white band</option>
-        <option value="wet">Wet Chemical &mdash; oatmeal band</option>
+        <option value="wet">Wet Chemical &mdash; beige band</option>
         <option value="co2">CO2 &mdash; black band</option>
       </select>
     </div>
@@ -1070,7 +1070,7 @@ function symDims(o) {   // image-space width/height (before rotation)
   else if (t.glyph === "gpo") { w = s * (t.dbl ? 1.2 : 0.95); h = s * 1.05; }
   else if (t.glyph === "datap") { w = s * (t.dbl ? 1.25 : 0.95); h = s * 1.1; }
   else if (t.glyph === "msensor") { w = s * 1.5; h = s * 1.5; }
-  else if (t.glyph === "hreel") { w = s * 1.05; h = s * 1.15; }
+  else if (t.glyph === "hreel") { w = s * 1.35; h = s * 1.15; }
   else if (t.glyph === "exting") { w = s * 0.98; h = s * 1.25; }
   const rr = ((o.rot || 0) % 360) * Math.PI / 180;
   if (rr) {
@@ -1396,10 +1396,10 @@ function drawSym(c, o, scale) {
     const ny = -r + s * 0.06;
     c.beginPath(); c.moveTo(0, ny - s * 0.10); c.lineTo(0, ny + s * 0.08); c.stroke();
     c.beginPath();
-    c.moveTo(s * 0.04, ny - s * 0.08); c.lineTo(s * 0.42, ny - s * 0.015);
-    c.moveTo(s * 0.04, ny + s * 0.05); c.lineTo(s * 0.42, ny - s * 0.015);
+    c.moveTo(s * 0.04, ny - s * 0.08); c.lineTo(s * 0.56, ny - s * 0.035);
+    c.moveTo(s * 0.04, ny + s * 0.05); c.lineTo(s * 0.56, ny + s * 0.005);
     c.stroke();
-    c.beginPath(); c.moveTo(s * 0.42, ny - s * 0.08); c.lineTo(s * 0.42, ny + s * 0.05); c.stroke();
+    c.beginPath(); c.moveTo(s * 0.62, ny - s * 0.10); c.lineTo(s * 0.62, ny + s * 0.045); c.stroke();
   } else if (t.glyph === "exting") {
     // C17: extinguisher - body in symbol colour, black top hardware + horn,
     // band colour set by the Details "Type" selector (o.xt, see XT_BANDS)
@@ -2780,7 +2780,7 @@ function drawPalIcon(canvasEl, typeId) {
                 t.glyph === "hreel" || t.glyph === "exting") ? 26 : 15;
   const bigGlyphs = ["widetext", "exit", "db", "horn", "dbldoor", "sldoor", "rldoor", "window", "opening", "stair", "sndr"];
   drawSym(c, { kind:"sym", type:typeId, x:17, y:17, color:iconColor,
-    size: bigGlyphs.includes(t.glyph) ? 14 : (t.glyph === "door" || t.glyph === "lstair" || t.glyph === "dba") ? 18 : 26 }, 1);
+    size: bigGlyphs.includes(t.glyph) ? 14 : (t.glyph === "door" || t.glyph === "lstair" || t.glyph === "dba") ? 18 : t.glyph === "hreel" ? 24 : 26 }, 1);
 }
 
 const TAB_ICONS = { fav:"★", fire:"🔥", exit:"🏃", elec:"⚡", bldg:"🏠", markup:"✏️", modify:"🔧", tools:"🧰", views:"👁" };
@@ -2962,7 +2962,7 @@ function viewsToggleDefs() {
 }
 function buildViewsPanel() {
   const note = document.createElement("div");
-  note.style.cssText = "font-size:10.5px;color:#888;padding:4px 8px;max-width:120px;flex:0 0 auto";
+  note.style.cssText = "font-size:10.5px;color:#888;padding:4px 8px;max-width:120px;flex:0 0 auto;touch-action:pan-x";
   note.textContent = "Show / hide on screen only. Exports and reports are never affected.";
   paletteEl.appendChild(note);
   viewsToggleDefs().forEach(tg => {
@@ -2979,7 +2979,8 @@ function buildViewsPanel() {
     cnt.className = "cnt";
     cnt.textContent = tg.get() ? "on" : "off";
     d.appendChild(cnt);
-    d.onclick = () => { tg.set(!tg.get()); buildPalette(); draw(); };
+    d.style.touchAction = "pan-x";
+    d.onclick = () => { const sl = paletteEl.scrollLeft; tg.set(!tg.get()); buildPalette(); paletteEl.scrollLeft = sl; draw(); };
     paletteEl.appendChild(d);
   });
 }
