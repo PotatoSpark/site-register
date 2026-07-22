@@ -166,7 +166,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.10.2 (fs 1.8.2)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.11 (fs 1.9)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -2925,6 +2925,7 @@ function entriesForTab(tab) {
       if (TYPE_MAP[id]) return { kind:"sym", t:TYPE_MAP[id] };
       const m = MARKUP_TOOLS.find(mt => mt.id === id) || TOOLS_TAB.find(mt => mt.id === id) ||
                 MODIFY_TOOLS.find(mt => mt.id === id) || (id === "vesdar" ? VESDAR_TOOL : null);
+      if (m && TOOLS_TAB.some(tt => tt.id === m.id) && typeof fsModOn === "function" && !fsModOn("wsTools." + m.id)) return null;
       return m ? { kind:"tool", t:m } : null;
     }).filter(Boolean);
   }
@@ -2937,7 +2938,7 @@ function entriesForTab(tab) {
     return ids.map(id => ({ kind:"tool", t:MODIFY_TOOLS.find(m => m.id === id) })).filter(e => e.t);
   }
   if (tab === "tools") {
-    const out = TOOLS_TAB.map(t => ({ kind:"tool", t }));
+    const out = TOOLS_TAB.filter(t => typeof fsModOn !== "function" || fsModOn("wsTools." + t.id)).map(t => ({ kind:"tool", t }));
     TYPES.filter(t => t.tab === "tools").forEach(t => out.push({ kind:"sym", t }));
     return out;
   }
@@ -6393,8 +6394,8 @@ function fsStamp() {
     (fsDirty ? " · UNSAVED CHANGES — export when done" : "");
   const ex = document.getElementById("fsExportReg");
   ex.style.display = fsRegister ? "inline-block" : "none";
-  document.getElementById("fsPlannerBtn").style.display = fsRegister ? "inline-block" : "none";
-  document.getElementById("fsDashBtn").style.display = fsRegister ? "inline-block" : "none";
+  document.getElementById("fsPlannerBtn").style.display = (fsRegister && (typeof fsModOn !== "function" || fsModOn("planner"))) ? "inline-block" : "none";
+  document.getElementById("fsDashBtn").style.display = (fsRegister && (typeof fsModOn !== "function" || fsModOn("dashboard"))) ? "inline-block" : "none";
   ex.innerHTML = "&#128190; " + ((typeof fsRegFileHandle !== "undefined" && fsRegFileHandle) ? "Save register" : "Export register");
   ex.title = "Saves the WHOLE register file \u2014 client data + company profile + test checklists in one. To share just the company setup, use Profile \u2192 Export profile.";
 }
@@ -6576,7 +6577,7 @@ function fsRenderSite() {
 
   // status strip - compact (testing info shouldn't steal the show; Overview is the main event)
   html += '<div class="fscard" style="display:flex;flex-wrap:wrap;align-items:stretch;margin-bottom:14px">';
-  FS_CYCLES.filter(c => c.key !== "last5y" || (s.testing || {})[c.key]).forEach((c, i) => {
+  FS_CYCLES.filter(c => typeof fsCycOn !== "function" || fsCycOn(c.key)).filter(c => c.key !== "last5y" || (s.testing || {})[c.key]).forEach((c, i) => {
     const st = fsCycleStatus(s, c);
     html += '<div class="fsCyc" style="flex:1;min-width:118px;padding:7px 12px;' + (i ? 'border-left:1px solid var(--fs-border)' : '') + '">' +
       '<div style="font-size:10.5px;color:var(--fs-sub2);letter-spacing:.4px;text-transform:uppercase">' + c.label + '</div>' +
@@ -8011,7 +8012,7 @@ function fsRenderTest() {
     if (openDef) html += '<div style="background:#3a2320;border:1px solid #c62828;border-radius:8px;padding:8px 12px;font-size:13.5px;color:#ff8a80;margin-bottom:10px">&#9888; ' + openDef + ' open defect' + (openDef > 1 ? 's' : '') + ' carried forward — check the Defects tab on the site page.</div>';
     html += '<label>Technician</label><input type="text" id="fsTechName" autocomplete="off" value="' + fsEsc(localStorage.getItem("fs-user") || "") + '">';
     html += '<label style="margin-top:10px">Test type</label><div style="display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 12px">';
-    Object.entries((fsChecklists && fsChecklists.modes) || {}).forEach(([m, md]) => {
+    Object.entries((fsChecklists && fsChecklists.modes) || {}).filter(([m]) => typeof fsCycModeOn !== "function" || fsCycModeOn(m)).forEach(([m, md]) => {
       html += '<button class="btn fsModePick" data-mode="' + fsEsc(m) + '" style="flex:1;min-width:110px;padding:14px 8px;font-size:15px;font-weight:700">' + fsEsc((md && md.label) || m) + '</button>';
     });
     html += '</div>';
@@ -10533,6 +10534,639 @@ window.annTest = { parsePdf: annParsePdf, parseDelim: annParseDelim, parseF4000:
 if ("serviceWorker" in navigator && location.protocol === "https:") {
   navigator.serviceWorker.register("./sw.js");
 }
+</script>
+<script>
+/* ================= PASS DELTA: client profiles (modules + access), profile builder, Projects =================
+   Register-side layer, identical in FireSpark + Register (FS_WS_APP gates the job workspace).
+   A profile file with no "modules"/"access" blocks behaves exactly as before — zero migration. */
+
+/* ---------- modules ---------- */
+function fsModules() { return (fsProfile && fsProfile.modules && typeof fsProfile.modules === "object") ? fsProfile.modules : null; }
+function fsModOn(path) {
+  const m = fsModules(); if (!m) return true;
+  let cur = m;
+  for (const k of path.split(".")) {
+    if (cur == null || typeof cur !== "object" || !(k in cur)) return true;   // unspecified = on
+    cur = cur[k];
+  }
+  return cur !== false;
+}
+const FS_CYC_MOD = { lastMonthly:"monthly", last6m:"sixMonthly", lastAnnual:"annual", last5y:"fiveYearly" };
+function fsCycOn(key) { return fsModOn("cycles." + (FS_CYC_MOD[key] || key)); }
+function fsCycModeOn(mode) { return fsModOn("cycles." + mode); }
+
+const FS_RES_MOD = [["battcalc", "fsResBatt"], ["timer", "fsResTimer"], ["meter", "fsResMeter"],
+                    ["annuals", "fsResAnnuals"], ["pa", "fsResPa"], ["qrlookup", "fsResScan"]];
+function fsApplyModules() {
+  try {
+    FS_RES_MOD.forEach(([k, id]) => { const el = document.getElementById(id); if (el) el.style.display = fsModOn("resTools." + k) ? "" : "none"; });
+    const lib = document.getElementById("fsLibList");
+    if (lib) {
+      const on = fsModOn("resTools.library");
+      const desc = lib.previousElementSibling;
+      const head = desc ? desc.previousElementSibling : null;
+      [lib, document.getElementById("fsLibAdd"), desc, head].forEach(el => { if (el) el.style.display = on ? "" : "none"; });
+    }
+    const pe = document.getElementById("fsProjEntry");
+    if (pe) pe.style.display = fsModOn("sections.projects") ? "" : "none";
+    if (typeof fsStamp === "function" && fsRegister) fsStamp();
+    if (typeof buildPalette === "function") {
+      const app = document.getElementById("app");
+      if (app && app.style.display !== "none" && app.style.display !== "") buildPalette();
+    }
+  } catch (e) {}
+}
+
+/* ---------- access gate (client-side trial gate — NOT licensing; bypassable by design) ---------- */
+function fsAccess() { return (fsProfile && fsProfile.access && typeof fsProfile.access === "object" && fsProfile.access.mode) ? fsProfile.access : null; }
+function fsGateRemove() { const g = document.getElementById("fsGate"); if (g) g.remove(); }
+function fsGateShow(kind, a, extra) {
+  fsGateRemove();
+  const g = document.createElement("div");
+  g.id = "fsGate";
+  g.style.cssText = "position:fixed;inset:0;z-index:130;background:#101619;color:#e8e8e8;display:flex;align-items:center;justify-content:center;padding:20px";
+  const co = fsEsc((fsProfile && fsProfile.company && fsProfile.company.name) || "FireSpark");
+  let inner = '<div style="max-width:400px;width:100%;background:#1b2327;border:1px solid #2e3a40;border-radius:14px;padding:26px;text-align:center">';
+  inner += '<div style="font-size:12px;letter-spacing:2px;color:#2596ab;font-weight:800;margin-bottom:6px">' + co.toUpperCase() + '</div>';
+  if (kind === "login") {
+    inner += '<h2 style="font-size:21px;margin-bottom:4px">Unlock this app</h2>';
+    inner += '<div style="font-size:12.5px;color:#93a4ab;margin-bottom:16px">Enter the business name and password you were given. You only do this once on each device.</div>';
+    inner += '<input id="fsGateUser" placeholder="Business name" style="width:100%;padding:12px;border-radius:9px;border:1px solid #2e3a40;background:#12191c;color:#e8e8e8;font-size:15px;margin-bottom:8px">';
+    inner += '<input id="fsGatePass" type="password" placeholder="Password" style="width:100%;padding:12px;border-radius:9px;border:1px solid #2e3a40;background:#12191c;color:#e8e8e8;font-size:15px;margin-bottom:6px">';
+    inner += '<div id="fsGateMsg" style="min-height:18px;font-size:12.5px;color:#ff8a80;margin-bottom:8px"></div>';
+    inner += '<button id="fsGateGo" style="width:100%;padding:13px;border:none;border-radius:9px;background:#2596ab;color:#fff;font-size:15.5px;font-weight:700;cursor:pointer">Unlock</button>';
+    if (a.expiry) inner += '<div style="font-size:12px;color:#93a4ab;margin-top:12px">' + (a.mode === "trial" ? "Trial" : "Access") + ' until ' + fsEsc(a.expiry) + '</div>';
+  } else if (kind === "notyet") {
+    inner += '<h2 style="font-size:21px;margin-bottom:8px">Not active yet</h2>';
+    inner += '<div style="font-size:13.5px;color:#93a4ab">Access starts on ' + fsEsc(a.start) + '.</div>';
+  } else {
+    inner += '<h2 style="font-size:22px;margin-bottom:8px">' + (a.mode === "trial" ? "Trial expired" : "Access expired") + '</h2>';
+    if (extra) inner += '<div style="font-size:12.5px;color:#ffb74d;margin-bottom:8px">' + fsEsc(extra) + '</div>';
+    inner += '<div style="font-size:13.5px;color:#93a4ab">' + (a.expiry ? 'This access ended on ' + fsEsc(a.expiry) + '.' : '') + '</div>';
+  }
+  if (a.contact) inner += '<div style="font-size:13px;color:#cfd8dc;margin-top:14px;border-top:1px solid #2e3a40;padding-top:12px">' + fsEsc(a.contact) + '</div>';
+  inner += '<div style="margin-top:14px"><a id="fsGateAdmin" style="font-size:11.5px;color:#546e7a;cursor:pointer;text-decoration:underline">Admin unlock</a></div>';
+  inner += '</div>';
+  g.innerHTML = inner;
+  document.body.appendChild(g);
+  const go = document.getElementById("fsGateGo");
+  if (go) go.onclick = async () => {
+    const u = (document.getElementById("fsGateUser").value || "").trim().toLowerCase();
+    const p = document.getElementById("fsGatePass").value || "";
+    if (u !== String(a.user || "").trim().toLowerCase() || (await fsSha256(p)) !== a.passHash) {
+      document.getElementById("fsGateMsg").textContent = "That business name + password combination isn't right.";
+      return;
+    }
+    try { localStorage.setItem("fs-unlock:" + a.passHash, "1"); } catch (e) {}
+    fsGateRemove();
+  };
+  const pw = document.getElementById("fsGatePass");
+  if (pw) pw.addEventListener("keydown", e => { if (e.key === "Enter" && go) go.onclick(); });
+  document.getElementById("fsGateAdmin").onclick = async () => {
+    if (!fsRegister || !fsRegister.adminPin) { alert("Load a register with an admin passcode first."); return; }
+    const p = prompt("Admin passcode:");
+    if (p === null) return;
+    if (await fsSha256(p) !== fsRegister.adminPin) { alert("Wrong passcode."); return; }
+    try { sessionStorage.setItem("fs-gate-admin", "1"); } catch (e) {}
+    fsGateRemove();
+  };
+}
+async function fsGateCheck() {
+  try {
+    const a = fsAccess();
+    if (!a) { fsGateRemove(); return; }
+    try { if (sessionStorage.getItem("fs-gate-admin") === "1") { fsGateRemove(); return; } } catch (e) {}
+    const today = new Date().toISOString().slice(0, 10);
+    let seen = null;
+    try { seen = await idbGet("fsSeenDate"); } catch (e) {}
+    if (seen && typeof seen === "string" && today < seen) { fsGateShow("locked", a, "This device's clock appears to have been wound back."); return; }
+    try { if (!seen || today > seen) await idbPut("fsSeenDate", today); } catch (e) {}
+    if (a.expiry && today > a.expiry) { fsGateShow("locked", a, ""); return; }
+    if (a.start && today < a.start) { fsGateShow("notyet", a, ""); return; }
+    if (a.user && a.passHash) {
+      let ok = false;
+      try { ok = localStorage.getItem("fs-unlock:" + a.passHash) === "1"; } catch (e) {}
+      if (!ok) { fsGateShow("login", a, ""); return; }
+    }
+    fsGateRemove();
+  } catch (e) {}
+}
+
+/* hook profile lifecycle */
+const _fsLoadProfileD = fsLoadProfile;
+fsLoadProfile = async function () { await _fsLoadProfileD(); fsApplyModules(); fsGateCheck(); };
+const _fsProfileFromFileD = fsProfileFromFile;
+fsProfileFromFile = function (obj) { const r = _fsProfileFromFileD(obj); fsApplyModules(); fsGateCheck(); return r; };
+
+/* ---------- Projects (standalone job-number work) ---------- */
+function fsProjects() { if (!fsRegister) return []; fsRegister.projects = fsRegister.projects || []; return fsRegister.projects; }
+let fsJob = null;
+window._fsJobWs = false;
+
+(function fsProjViewsInit() {
+  try {
+    const anchor = document.getElementById("fsPlannerView");
+    const host = anchor.parentNode;
+    const pv = document.createElement("div"); pv.id = "fsProjView"; pv.style.display = "none"; host.insertBefore(pv, anchor);
+    const jv = document.createElement("div"); jv.id = "fsJobView"; jv.style.display = "none"; host.insertBefore(jv, anchor);
+    const pin = document.createElement("input"); pin.type = "file"; pin.id = "fsJobPhotoInput"; pin.accept = "image/*,.jpg,.jpeg,.png,.gif,.webp"; pin.multiple = true; pin.style.display = "none"; host.appendChild(pin);
+    const iin = document.createElement("input"); iin.type = "file"; iin.id = "fsJobInvInput"; iin.accept = "image/*,application/pdf,.pdf,.jpg,.jpeg,.png"; iin.style.display = "none"; host.appendChild(iin);
+  } catch (e) {}
+})();
+
+const _fsShowD = fsShow;
+fsShow = function (view) {
+  if (view === "fsClientsView" && fsRegister && !fsModOn("sections.service") && fsModOn("sections.projects")) { fsRenderProjects(); view = "fsProjView"; }
+  _fsShowD(view);
+  ["fsProjView", "fsJobView"].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = id === view ? "block" : "none"; });
+};
+
+const _fsRenderClientsD = fsRenderClients;
+fsRenderClients = function () {
+  _fsRenderClientsD();
+  try {
+    if (!fsModOn("sections.projects")) return;
+    const wrap = document.getElementById("fsClientList");
+    const n = fsProjects().filter(j => j.status !== "done").length;
+    const row = document.createElement("div");
+    row.className = "fscard"; row.id = "fsProjEntry";
+    row.style.cssText += ";padding:16px;margin-bottom:10px;cursor:pointer;display:flex;align-items:center;gap:12px;border-left:4px solid var(--fs-accent)";
+    row.innerHTML = '<div style="flex:1"><div style="font-size:16.5px;font-weight:700">&#128188; Projects</div>' +
+      '<div style="font-size:12.5px;color:var(--fs-sub2)">Job-number work &middot; ' + n + ' open</div></div><div style="color:var(--fs-faint)">&#9654;</div>';
+    row.onclick = () => { fsRenderProjects(); fsShow("fsProjView"); };
+    wrap.insertBefore(row, wrap.firstChild);
+  } catch (e) {}
+};
+
+function fsJobLabel(j) { return (j.jobNo ? j.jobNo : "(no job number)") + (j.customer && j.customer.name ? " — " + j.customer.name : ""); }
+
+function fsRenderProjects() {
+  const wrap = document.getElementById("fsProjView");
+  const svc = fsModOn("sections.service");
+  let html = "";
+  if (svc) html += '<div style="margin-bottom:14px"><a id="fsProjBack" class="fsCrumb">&#8592; All clients</a></div>';
+  html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">' +
+    '<h2 style="font-size:22px;flex:1">&#128188; Projects</h2>' +
+    '<button class="fsbtn" id="fsAddJobBtn">&#65291; Add job</button></div>';
+  html += '<input type="text" id="fsProjSearch" class="fsinput" placeholder="Search job number, customer, address&hellip;" style="padding:12px;font-size:15px;margin-bottom:13px">';
+  html += '<div id="fsProjList"></div>';
+  wrap.innerHTML = html;
+  if (svc) document.getElementById("fsProjBack").onclick = () => { fsRenderClients(); _fsShowD("fsClientsView"); document.getElementById("fsProjView").style.display = "none"; };
+  document.getElementById("fsAddJobBtn").onclick = () => {
+    const no = (prompt("Job number:") || "").trim();
+    if (!no) return;
+    const j = { id: "job_" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36), jobNo: no, created: new Date().toISOString().slice(0, 10),
+      status: "open", customer: { name: "", address: "", phone: "", email: "" }, desc: "", notes: "", photos: [], invoice: { no: "", amount: "", paid: false, file: null } };
+    fsProjects().unshift(j);
+    fsMarkDirty();
+    fsJob = j; fsJobEdit = true;
+    fsRenderJob(); fsShow("fsJobView");
+  };
+  document.getElementById("fsProjSearch").oninput = fsProjListRender;
+  fsProjListRender();
+}
+function fsProjListRender() {
+  const q = ((document.getElementById("fsProjSearch") || {}).value || "").toLowerCase();
+  const list = document.getElementById("fsProjList");
+  if (!list) return;
+  list.innerHTML = "";
+  const jobs = fsProjects().filter(j => {
+    if (!q) return true;
+    const c = j.customer || {};
+    return (String(j.jobNo) + " " + (c.name || "") + " " + (c.address || "") + " " + (j.desc || "")).toLowerCase().includes(q);
+  });
+  if (!jobs.length) {
+    list.innerHTML = '<div class="fscard" style="padding:20px;text-align:center;color:var(--fs-sub2);font-size:14px">' + (q ? "No jobs match that search." : "No jobs yet &mdash; add the first one.") + '</div>';
+    return;
+  }
+  jobs.forEach(j => {
+    const c = j.customer || {};
+    const inv = j.invoice || {};
+    const row = document.createElement("div");
+    row.className = "fscard";
+    row.style.cssText += ";padding:14px 16px;margin-bottom:9px;cursor:pointer;display:flex;align-items:center;gap:12px";
+    const chips =
+      '<span style="font-size:10.5px;font-weight:800;letter-spacing:.4px;border-radius:20px;padding:2px 9px;' + (j.status === "done" ? "background:#e0e6e9;color:#5a6b72" : "background:#1b8a3f22;color:#1b8a3f") + '">' + (j.status === "done" ? "DONE" : "OPEN") + '</span>' +
+      (inv.amount ? '<span style="font-size:10.5px;font-weight:800;letter-spacing:.4px;border-radius:20px;padding:2px 9px;' + (inv.paid ? "background:#1b8a3f22;color:#1b8a3f" : "background:#c6282822;color:#c62828") + '">' + (inv.paid ? "PAID" : "UNPAID") + '</span>' : '');
+    row.innerHTML = '<div style="flex:1;min-width:0"><div style="font-size:15.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + fsEsc(j.jobNo) + (c.name ? ' <span style="font-weight:500;color:var(--fs-sub)">&middot; ' + fsEsc(c.name) + '</span>' : '') + '</div>' +
+      '<div style="font-size:12px;color:var(--fs-sub2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + fsEsc(c.address || j.desc || j.created || "") + '</div></div>' +
+      '<div style="display:flex;gap:6px;flex:0 0 auto">' + chips + '</div><div style="color:var(--fs-faint)">&#9654;</div>';
+    row.onclick = () => { fsJob = j; fsJobEdit = false; fsRenderJob(); fsShow("fsJobView"); };
+    list.appendChild(row);
+  });
+}
+
+let fsJobEdit = false;
+function fsJobField(label, id, val, ph) {
+  return '<div style="margin-bottom:8px"><div style="font-size:10.5px;color:var(--fs-sub2);letter-spacing:.4px;text-transform:uppercase;margin-bottom:2px">' + label + '</div>' +
+    '<input id="' + id + '" class="fsinput" style="padding:9px" value="' + fsEsc(val || "").replace(/"/g, "&quot;") + '" placeholder="' + (ph || "") + '"></div>';
+}
+function fsRenderJob() {
+  const j = fsJob;
+  if (!j) return;
+  const c = j.customer = j.customer || {};
+  const inv = j.invoice = j.invoice || { no: "", amount: "", paid: false, file: null };
+  const wrap = document.getElementById("fsJobView");
+  let html = '<div style="margin-bottom:14px"><a id="fsJobBack" class="fsCrumb">&#8592; Projects</a></div>';
+  html += '<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin-bottom:16px">';
+  html += '<div style="flex:1;min-width:250px"><div style="font-size:11px;letter-spacing:2px;color:var(--fs-accent);font-weight:800">JOB &middot; ' + (j.status === "done" ? "DONE" : "OPEN") + '</div>';
+  html += '<h1 style="font-size:30px;font-weight:700;margin:2px 0 4px">' + fsEsc(j.jobNo || "(no number)") + '</h1>';
+  if (c.name) html += '<div style="color:var(--fs-sub);font-size:15px">' + fsEsc(c.name) + (c.address ? ' &middot; ' + fsEsc(c.address) : '') + '</div>';
+  html += '</div><div style="display:flex;gap:10px;align-items:center;padding-top:22px;flex-wrap:wrap">';
+  if (typeof FS_WS_APP === "undefined" || FS_WS_APP) html += '<button class="fsbtnP" id="fsJobWs">Open Job Workspace &nbsp;&#8594;</button>';
+  else html += '<span style="font-size:12.5px;color:#b7791f;max-width:210px">Plans &amp; markup live in the FireSpark app &mdash; this register edition shows job records only.</span>';
+  html += '</div></div>';
+
+  /* details card */
+  html += '<div class="fscard" style="padding:18px;margin-bottom:14px"><div style="display:flex;align-items:center;margin-bottom:10px"><h3 style="font-size:15px;flex:1">Job details</h3><button class="fsbtn" id="fsJobEditBtn" style="padding:6px 12px;font-size:12.5px">' + (fsJobEdit ? "&#10003; Save" : "&#9998; Edit") + '</button></div>';
+  if (fsJobEdit) {
+    html += fsJobField("Job number", "fsJfNo", j.jobNo);
+    html += '<div style="margin-bottom:8px"><div style="font-size:10.5px;color:var(--fs-sub2);letter-spacing:.4px;text-transform:uppercase;margin-bottom:2px">Status</div><select id="fsJfStatus" class="fsinput" style="padding:9px"><option value="open"' + (j.status !== "done" ? " selected" : "") + '>Open</option><option value="done"' + (j.status === "done" ? " selected" : "") + '>Done</option></select></div>';
+    html += fsJobField("Customer name", "fsJfCName", c.name);
+    html += fsJobField("Address", "fsJfCAddr", c.address);
+    html += fsJobField("Phone", "fsJfCPhone", c.phone);
+    html += fsJobField("Email", "fsJfCEmail", c.email);
+    html += '<div style="margin-bottom:8px"><div style="font-size:10.5px;color:var(--fs-sub2);letter-spacing:.4px;text-transform:uppercase;margin-bottom:2px">Description of work</div><textarea id="fsJfDesc" class="fsinput" style="padding:9px;min-height:64px">' + fsEsc(j.desc || "") + '</textarea></div>';
+    html += '<div style="margin-bottom:2px"><div style="font-size:10.5px;color:var(--fs-sub2);letter-spacing:.4px;text-transform:uppercase;margin-bottom:2px">Notes</div><textarea id="fsJfNotes" class="fsinput" style="padding:9px;min-height:64px">' + fsEsc(j.notes || "") + '</textarea></div>';
+  } else {
+    const rows = [["Customer", c.name], ["Address", c.address], ["Phone", c.phone], ["Email", c.email], ["Description", j.desc], ["Notes", j.notes], ["Created", j.created]];
+    const filled = rows.filter(r => (r[1] || "").trim());
+    if (!filled.length) html += '<div style="font-size:13px;color:var(--fs-sub2)">No details yet &mdash; tap Edit.</div>';
+    filled.forEach(r => { html += '<div style="margin-bottom:7px"><div style="font-size:10.5px;color:var(--fs-sub2);letter-spacing:.4px;text-transform:uppercase">' + r[0] + '</div><div style="font-size:14px;white-space:pre-wrap">' + fsEsc(r[1]) + '</div></div>'; });
+  }
+  html += '</div>';
+
+  /* invoice card */
+  html += '<div class="fscard" style="padding:18px;margin-bottom:14px"><h3 style="font-size:15px;margin-bottom:10px">Invoice</h3>';
+  html += '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">';
+  html += '<div style="flex:1;min-width:120px">' + fsJobField("Invoice no.", "fsJfInvNo", inv.no) + '</div>';
+  html += '<div style="flex:1;min-width:120px">' + fsJobField("Amount ($)", "fsJfInvAmt", inv.amount) + '</div>';
+  html += '<label style="display:flex;align-items:center;gap:7px;font-size:14px;font-weight:700;cursor:pointer;padding:9px 0;color:' + (inv.paid ? "#1b8a3f" : "#c62828") + '"><input type="checkbox" id="fsJfInvPaid"' + (inv.paid ? " checked" : "") + '> ' + (inv.paid ? "Paid" : "Unpaid") + '</label>';
+  html += '</div><div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">';
+  if (inv.file) {
+    html += '<button class="fsbtn" id="fsJobInvView" style="padding:7px 12px;font-size:12.5px">&#128196; View attached invoice</button>';
+    html += '<button class="fsbtn" id="fsJobInvDel" style="padding:7px 12px;font-size:12.5px">&#10005; Remove attachment</button>';
+  } else {
+    html += '<button class="fsbtn" id="fsJobInvAdd" style="padding:7px 12px;font-size:12.5px">&#128206; Attach invoice (photo or PDF)</button>';
+  }
+  html += '</div></div>';
+
+  /* photos card */
+  html += '<div class="fscard" style="padding:18px;margin-bottom:14px"><div style="display:flex;align-items:center;margin-bottom:10px"><h3 style="font-size:15px;flex:1">Photos' + ((j.photos || []).length ? " (" + j.photos.length + ")" : "") + '</h3><button class="fsbtn" id="fsJobPhotoAdd" style="padding:6px 12px;font-size:12.5px">&#65291; Add</button></div>';
+  if ((j.photos || []).length) {
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px">';
+    j.photos.forEach((p, i) => {
+      html += '<div style="position:relative"><img data-jp="' + i + '" src="' + p.src + '" style="width:100%;height:96px;object-fit:cover;border-radius:8px;cursor:zoom-in">' +
+        '<button data-jpdel="' + i + '" style="position:absolute;top:4px;right:4px;border:none;background:rgba(0,0,0,.55);color:#fff;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:12px">&#10005;</button></div>';
+    });
+    html += '</div>';
+  } else html += '<div style="font-size:13px;color:var(--fs-sub2)">No photos yet.</div>';
+  html += '</div>';
+
+  html += '<div style="text-align:right;margin-bottom:30px"><button class="fsbtn" id="fsJobDel" style="color:#c62828;border-color:#c6282855">&#128465; Delete this job</button></div>';
+  wrap.innerHTML = html;
+
+  /* wiring */
+  document.getElementById("fsJobBack").onclick = () => { fsRenderProjects(); fsShow("fsProjView"); };
+  const ws = document.getElementById("fsJobWs");
+  if (ws) ws.onclick = () => fsEnterJobWorkspace(j);
+  document.getElementById("fsJobEditBtn").onclick = () => {
+    if (fsJobEdit) {
+      j.jobNo = (document.getElementById("fsJfNo").value || "").trim();
+      j.status = document.getElementById("fsJfStatus").value;
+      c.name = document.getElementById("fsJfCName").value.trim();
+      c.address = document.getElementById("fsJfCAddr").value.trim();
+      c.phone = document.getElementById("fsJfCPhone").value.trim();
+      c.email = document.getElementById("fsJfCEmail").value.trim();
+      j.desc = document.getElementById("fsJfDesc").value;
+      j.notes = document.getElementById("fsJfNotes").value;
+      fsMarkDirty();
+    }
+    fsJobEdit = !fsJobEdit;
+    fsRenderJob();
+  };
+  const saveInv = () => {
+    inv.no = (document.getElementById("fsJfInvNo").value || "").trim();
+    inv.amount = (document.getElementById("fsJfInvAmt").value || "").trim();
+    inv.paid = document.getElementById("fsJfInvPaid").checked;
+    fsMarkDirty();
+  };
+  document.getElementById("fsJfInvNo").onchange = saveInv;
+  document.getElementById("fsJfInvAmt").onchange = saveInv;
+  document.getElementById("fsJfInvPaid").onchange = () => { saveInv(); fsRenderJob(); };
+  const invAdd = document.getElementById("fsJobInvAdd");
+  if (invAdd) invAdd.onclick = () => document.getElementById("fsJobInvInput").click();
+  const invView = document.getElementById("fsJobInvView");
+  if (invView) invView.onclick = () => {
+    const f = inv.file;
+    if (!f) return;
+    if (f.type === "pdf") {
+      try {
+        const b = atob(f.src.split(",")[1]);
+        const arr = new Uint8Array(b.length);
+        for (let i = 0; i < b.length; i++) arr[i] = b.charCodeAt(i);
+        deliverFile(new Blob([arr], { type: "application/pdf" }), f.name || ("invoice-" + (j.jobNo || "job") + ".pdf"), "application/pdf");
+      } catch (e) { alert("Couldn't open that attachment."); }
+    } else {
+      const lb = document.getElementById("fsLightbox"), im = document.getElementById("fsLbImg");
+      if (lb && im) { if (typeof fsLbTarget !== "undefined") fsLbTarget = null; const r = document.getElementById("fsLbReplace"); if (r) r.style.display = "none"; im.src = f.src; lb.style.display = "block"; }
+    }
+  };
+  const invDel = document.getElementById("fsJobInvDel");
+  if (invDel) invDel.onclick = () => { if (confirm("Remove the attached invoice file?")) { inv.file = null; fsMarkDirty(); fsRenderJob(); } };
+  document.getElementById("fsJobPhotoAdd").onclick = () => document.getElementById("fsJobPhotoInput").click();
+  wrap.querySelectorAll("[data-jp]").forEach(im => im.onclick = () => {
+    const lb = document.getElementById("fsLightbox"), li = document.getElementById("fsLbImg");
+    if (lb && li) { if (typeof fsLbTarget !== "undefined") fsLbTarget = null; const r = document.getElementById("fsLbReplace"); if (r) r.style.display = "none"; li.src = j.photos[+im.dataset.jp].src; lb.style.display = "block"; }
+  });
+  wrap.querySelectorAll("[data-jpdel]").forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    if (confirm("Delete this photo?")) { j.photos.splice(+b.dataset.jpdel, 1); fsMarkDirty(); fsRenderJob(); }
+  });
+  document.getElementById("fsJobDel").onclick = () => {
+    if (!confirm('Delete job "' + (j.jobNo || "?") + '" and everything on it (photos, invoice, plan)? This cannot be undone from the app.')) return;
+    const ix = fsProjects().indexOf(j);
+    if (ix >= 0) fsProjects().splice(ix, 1);
+    fsMarkDirty();
+    fsRenderProjects(); fsShow("fsProjView");
+  };
+}
+
+/* job photo + invoice intake (1600px jpeg downscale, loud failure like site photos) */
+function fsJobReadImg(file, cb, fail) {
+  const reader = new FileReader();
+  reader.onerror = () => fail(file.name || "photo");
+  reader.onload = () => {
+    const im = new Image();
+    im.onerror = () => fail(file.name || "photo");
+    im.onload = () => {
+      try {
+        const mx = 1600;
+        const sc = Math.min(1, mx / Math.max(im.width, im.height));
+        const cv = document.createElement("canvas");
+        cv.width = Math.round(im.width * sc); cv.height = Math.round(im.height * sc);
+        cv.getContext("2d").drawImage(im, 0, 0, cv.width, cv.height);
+        cb(cv.toDataURL("image/jpeg", 0.82));
+      } catch (e) { fail(file.name || "photo"); }
+    };
+    im.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+document.getElementById("fsJobPhotoInput").addEventListener("change", e => {
+  const files = [...(e.target.files || [])];
+  e.target.value = "";
+  if (!files.length || !fsJob) return;
+  const failed = [];
+  let done = 0;
+  const fin = () => {
+    done++;
+    if (done < files.length) return;
+    fsMarkDirty(); fsRenderJob();
+    if (failed.length) alert("Couldn't read " + failed.length + " photo" + (failed.length > 1 ? "s" : "") + ": " + failed.join(", ") +
+      "\n\nUsual cause: HEIC format (iPhone/iPad default) or a non-image file. Fix: share/export the photo as JPEG, or in the Files app use Quick Actions > Convert Image. Screenshots always work.");
+  };
+  files.forEach(f => fsJobReadImg(f, src => { fsJob.photos = fsJob.photos || []; fsJob.photos.push({ src: src, t: Date.now() }); fin(); }, n => { failed.push(n); fin(); }));
+});
+document.getElementById("fsJobInvInput").addEventListener("change", e => {
+  const f = (e.target.files || [])[0];
+  e.target.value = "";
+  if (!f || !fsJob) return;
+  const inv = fsJob.invoice = fsJob.invoice || {};
+  if ((f.type || "").includes("pdf") || /\.pdf$/i.test(f.name || "")) {
+    if (f.size > 8 * 1024 * 1024) { alert("That PDF is over 8MB — attach a smaller copy (it lives inside the register file)."); return; }
+    const r = new FileReader();
+    r.onerror = () => alert("Couldn't read that file.");
+    r.onload = () => { inv.file = { type: "pdf", name: f.name, src: r.result }; fsMarkDirty(); fsRenderJob(); };
+    r.readAsDataURL(f);
+  } else {
+    fsJobReadImg(f, src => { inv.file = { type: "img", name: f.name, src: src }; fsMarkDirty(); fsRenderJob(); },
+      () => alert("Couldn't read that file — use a JPEG/PNG photo or a PDF."));
+  }
+});
+
+/* ---------- job workspace (FS only; reuses the whole site-workspace machinery via fsSite = job) ---------- */
+function fsEnterJobWorkspace(job) {
+  if (typeof FS_WS_APP !== "undefined" && !FS_WS_APP) return;
+  fsJob = job;
+  fsSite = job;                 // autosave embeds into job.plan; per-job autosave key via fsSiteCtx.siteId
+  fsParentSite = null;
+  fsSiteCtx = { clientId: "projects", siteId: job.id, clientName: "Projects", siteName: "Job " + (job.jobNo || "?") + (job.customer && job.customer.name ? " — " + job.customer.name : "") };
+  window._fsJobWs = true;
+  document.getElementById("fsReg").style.display = "none";
+  document.getElementById("app").style.display = "flex";
+  document.getElementById("fsSiteName").textContent = fsSiteCtx.siteName;
+  try { fsBinBtnRefresh(); } catch (e) {}
+  fsLoadProfile().then(fsLoadChecklists).then(fsRestoreSession);
+  resizeCanvas();
+  tryRestoreAutosave();
+}
+try {
+  const _fsEnterWsD = fsEnterWorkspace;
+  fsEnterWorkspace = function () { window._fsJobWs = false; return _fsEnterWsD(); };
+  const fsBackBtnD = document.getElementById("fsBack");
+  const _fsBackD = fsBackBtnD.onclick;
+  fsBackBtnD.onclick = async () => {
+    if (!window._fsJobWs) return _fsBackD();
+    await autosaveNow();
+    img = null; imgDataUrl = null; objects = []; clearSelection();
+    undoStack = []; redoStack = []; siteNotes = ""; pageBaseH = null; sitePhotos = [];
+    levels = []; curLevel = 0; refreshLevelSel();
+    curScaleMpp = null; measureStart = null; measureLive = null; flashSym = null;
+    currentProjId = null; fileHandle = null;
+    document.getElementById("dropHint").classList.remove("hidden");
+    document.getElementById("app").style.display = "none";
+    document.getElementById("fsReg").style.display = "block";
+    window._fsJobWs = false;
+    fsRenderJob(); fsShow("fsJobView");
+    fsStamp(); updateStatus();
+  };
+} catch (e) {}
+
+/* ---------- profile builder (admin-gated, inside the Dashboard) ---------- */
+const FS_BLD_RES = [["battcalc", "Battery calculator"], ["timer", "Countdown timer"], ["meter", "Sound meter"],
+                    ["annuals", "Annuals converter"], ["pa", "PA announcements"], ["qrlookup", "Scan QR tag"], ["library", "Library"]];
+function fsBldGroups() {
+  return [
+    ["Test cycles", "cycles", [["monthly", "Monthly"], ["sixMonthly", "6 monthly"], ["annual", "Annual"], ["fiveYearly", "5 yearly"]]],
+    ["General", "", [["planner", "Planner"], ["dashboard", "Dashboard (admin)"]]],
+    ["Sections", "sections", [["service", "Service clients (register)"], ["projects", "Projects (job numbers)"]]],
+    ["Workspace tools", "wsTools", (typeof TOOLS_TAB !== "undefined" ? TOOLS_TAB : []).map(t => [t.id, t.label])],
+    ["Resources tools", "resTools", FS_BLD_RES]
+  ];
+}
+let fsBld = null;
+function fsBldDefault() {
+  const m = {};
+  fsBldGroups().forEach(([, gk, items]) => items.forEach(([k]) => { m[(gk ? gk + "." : "") + k] = true; }));
+  return { name: "", modules: m, access: { mode: "none", start: "", expiry: "", user: "", pass: "", passHash: "", contact: "" }, incl: true };
+}
+const FS_BLD_PRESETS = {
+  full: () => {},
+  service: st => { st.modules["sections.projects"] = false; },
+  projects: st => {
+    st.modules["sections.service"] = false;
+    ["cycles.monthly", "cycles.sixMonthly", "cycles.annual", "cycles.fiveYearly", "planner", "dashboard"].forEach(k => st.modules[k] = false);
+  }
+};
+function fsBuilderModalEl() {
+  let m = document.getElementById("fsBuilderModal");
+  if (m) return m;
+  m = document.createElement("div");
+  m.className = "modal"; m.id = "fsBuilderModal"; m.style.zIndex = "121";
+  m.innerHTML = '<div class="modalbox" style="max-width:560px;width:95vw;max-height:86vh;overflow-y:auto;text-align:left"><div id="fsBldBody"></div></div>';
+  document.body.appendChild(m);
+  return m;
+}
+function fsBuilderOpen() {
+  fsBld = fsBld || fsBldDefault();
+  fsBuilderModalEl().classList.add("show");
+  fsBuilderRender();
+}
+function fsBuilderRender() {
+  const st = fsBld;
+  const body = document.getElementById("fsBldBody");
+  let h = '<h3 style="margin-bottom:2px">&#128736; Client profile builder</h3>';
+  h += '<div style="font-size:11.5px;color:#999;margin-bottom:10px">Builds a profile FILE for a client &mdash; nothing here changes THIS app. The login/expiry gate is client-side only: fine for trials, it is not real licensing.</div>';
+  h += '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap"><span style="font-size:12.5px;font-weight:700">Preset:</span>';
+  [["full", "Full"], ["service", "Service only"], ["projects", "Projects only"]].forEach(([k, lbl]) => {
+    h += '<button class="btn" data-bldpre="' + k + '" style="padding:6px 12px;font-size:12.5px">' + lbl + '</button>';
+  });
+  h += '<span style="font-size:11px;color:#999">then tweak anything below</span></div>';
+  h += '<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;margin-bottom:3px">Client / company name</div><input id="fsBldName" style="width:100%;padding:9px;border-radius:8px;border:1px solid #444;background:#2e333a;color:#e8e8e8" value="' + fsEsc(st.name).replace(/"/g, "&quot;") + '"></div>';
+  fsBldGroups().forEach(([title, gk, items], gi) => {
+    h += '<div style="font-size:12px;font-weight:700;color:#7ddb8f;margin:10px 0 5px">' + title.toUpperCase() + '</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 10px">';
+    items.forEach(([k, lbl]) => {
+      const path = (gk ? gk + "." : "") + k;
+      h += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="checkbox" data-bldmod="' + path + '"' + (st.modules[path] !== false ? " checked" : "") + '> ' + fsEsc(lbl) + '</label>';
+    });
+    h += '</div>';
+  });
+  const a = st.access;
+  h += '<div style="font-size:12px;font-weight:700;color:#7ddb8f;margin:12px 0 5px">ACCESS</div>';
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px"><select id="fsBldMode" style="padding:8px;border-radius:8px;border:1px solid #444;background:#2e333a;color:#e8e8e8">' +
+    [["none", "No gate (open)"], ["trial", "Trial"], ["subscription", "Subscription"], ["perpetual", "Perpetual"]].map(([k, l]) => '<option value="' + k + '"' + (a.mode === k ? " selected" : "") + '>' + l + '</option>').join("") + '</select>';
+  if (a.mode === "trial") h += '<button class="btn" id="fsBld7" style="padding:6px 10px;font-size:12px">7 days</button><button class="btn" id="fsBld14" style="padding:6px 10px;font-size:12px">14 days</button>';
+  h += '</div>';
+  if (a.mode !== "none") {
+    h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">';
+    h += '<div><div style="font-size:11px;color:#999">Start</div><input type="date" id="fsBldStart" value="' + fsEsc(a.start) + '" style="width:100%;padding:8px;border-radius:8px;border:1px solid #444;background:#2e333a;color:#e8e8e8"></div>';
+    h += '<div><div style="font-size:11px;color:#999">Expiry ' + (a.mode === "perpetual" ? "(leave blank)" : "") + '</div><input type="date" id="fsBldExp" value="' + fsEsc(a.expiry) + '" style="width:100%;padding:8px;border-radius:8px;border:1px solid #444;background:#2e333a;color:#e8e8e8"></div>';
+    h += '<div><div style="font-size:11px;color:#999">Login business name</div><input id="fsBldUser" value="' + fsEsc(a.user).replace(/"/g, "&quot;") + '" style="width:100%;padding:8px;border-radius:8px;border:1px solid #444;background:#2e333a;color:#e8e8e8"></div>';
+    h += '<div><div style="font-size:11px;color:#999">Password ' + (a.passHash ? "(blank = keep current)" : "") + '</div><input id="fsBldPass" value="' + fsEsc(a.pass).replace(/"/g, "&quot;") + '" style="width:100%;padding:8px;border-radius:8px;border:1px solid #444;background:#2e333a;color:#e8e8e8"></div>';
+    h += '</div><div style="margin-bottom:8px"><div style="font-size:11px;color:#999">Contact line shown on the lockout screen</div><input id="fsBldContact" value="' + fsEsc(a.contact).replace(/"/g, "&quot;") + '" placeholder="e.g. Call Reece on 04xx xxx xxx to keep going" style="width:100%;padding:8px;border-radius:8px;border:1px solid #444;background:#2e333a;color:#e8e8e8"></div>';
+  }
+  h += '<label style="display:flex;align-items:center;gap:7px;font-size:12.5px;margin:8px 0;cursor:pointer"><input type="checkbox" id="fsBldIncl"' + (st.incl ? " checked" : "") + '> Include the currently loaded profile’s equipment fields &amp; checklists' + (fsProfile ? "" : " (no profile loaded — defaults will apply)") + '</label>';
+  h += '<div class="row" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="fsBldLoad">&#128194; Load profile to edit</button><span style="flex:1"></span><button class="btn" id="fsBldClose">Close</button><button class="btn" id="fsBldExport" style="background:#1b8a3f;border-color:#1b8a3f;color:#fff;font-weight:700">&#128190; Export profile file</button></div>';
+  h += '<input type="file" id="fsBldFile" accept=".json,application/json" style="display:none">';
+  body.innerHTML = h;
+
+  /* wiring */
+  body.querySelectorAll("[data-bldpre]").forEach(b => b.onclick = () => {
+    fsBld = fsBldDefault();
+    fsBld.name = document.getElementById("fsBldName").value;
+    fsBld.access = st.access;
+    fsBld.incl = document.getElementById("fsBldIncl").checked;
+    (FS_BLD_PRESETS[b.dataset.bldpre] || (() => {}))(fsBld);
+    fsBuilderRender();
+  });
+  const syncTop = () => {
+    st.name = document.getElementById("fsBldName").value;
+    st.incl = document.getElementById("fsBldIncl").checked;
+    body.querySelectorAll("[data-bldmod]").forEach(cb => { st.modules[cb.dataset.bldmod] = cb.checked; });
+    const gm = document.getElementById("fsBldMode");
+    if (gm) st.access.mode = gm.value;
+    ["Start", "Exp", "User", "Pass", "Contact"].forEach(f => {
+      const el = document.getElementById("fsBld" + f);
+      if (el) st.access[{ Start: "start", Exp: "expiry", User: "user", Pass: "pass", Contact: "contact" }[f]] = el.value;
+    });
+  };
+  document.getElementById("fsBldMode").onchange = () => { syncTop(); fsBuilderRender(); };
+  const d7 = document.getElementById("fsBld7"), d14 = document.getElementById("fsBld14");
+  const setDays = n => {
+    syncTop();
+    const t = new Date(); st.access.start = t.toISOString().slice(0, 10);
+    t.setDate(t.getDate() + n); st.access.expiry = t.toISOString().slice(0, 10);
+    fsBuilderRender();
+  };
+  if (d7) d7.onclick = () => setDays(7);
+  if (d14) d14.onclick = () => setDays(14);
+  document.getElementById("fsBldClose").onclick = () => { syncTop(); document.getElementById("fsBuilderModal").classList.remove("show"); };
+  document.getElementById("fsBldLoad").onclick = () => document.getElementById("fsBldFile").click();
+  document.getElementById("fsBldFile").onchange = e => {
+    const f = (e.target.files || [])[0];
+    e.target.value = "";
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const obj = JSON.parse(r.result);
+        if (!obj || obj.app !== "firespark-profile") { alert("That isn't a FireSpark profile file."); return; }
+        const st2 = fsBldDefault();
+        st2.name = (obj.company && obj.company.name) || "";
+        if (obj.modules) {
+          const flat = (o, pre) => Object.entries(o).forEach(([k, v]) => {
+            if (v && typeof v === "object") flat(v, pre + k + ".");
+            else st2.modules[pre + k] = v !== false;
+          });
+          flat(obj.modules, "");
+        }
+        if (obj.access) st2.access = { mode: obj.access.mode || "none", start: obj.access.start || "", expiry: obj.access.expiry || "", user: obj.access.user || "", pass: "", passHash: obj.access.passHash || "", contact: obj.access.contact || "" };
+        st2._src = obj;
+        fsBld = st2;
+        fsBuilderRender();
+      } catch (err) { alert("Couldn't read that file."); }
+    };
+    r.readAsText(f);
+  };
+  document.getElementById("fsBldExport").onclick = async () => {
+    syncTop();
+    const name = st.name.trim();
+    if (!name) { alert("Give the profile a client / company name first."); return; }
+    const modules = { cycles: {}, sections: {}, wsTools: {}, resTools: {} };
+    Object.entries(st.modules).forEach(([path, v]) => {
+      const parts = path.split(".");
+      if (parts.length === 1) modules[parts[0]] = !!v;
+      else { modules[parts[0]] = modules[parts[0]] || {}; modules[parts[0]][parts[1]] = !!v; }
+    });
+    const src = st._src || {};
+    const base = st.incl && fsProfile ? fsProfile : (st.incl ? src : {});
+    const out = { app: "firespark-profile", version: 2, created: new Date().toISOString().slice(0, 10), company: { name: name }, modules: modules };
+    if (base.equipment && base.equipment.length) out.equipment = base.equipment;
+    if (base.equipmentItems && base.equipmentItems.length) out.equipmentItems = base.equipmentItems;
+    if (base.checklists && base.checklists.modes) out.checklists = base.checklists;
+    if (st.access.mode !== "none") {
+      const a = st.access;
+      let passHash = a.passHash || "";
+      if (a.pass) passHash = await fsSha256(a.pass);
+      if (a.user && !passHash) { alert("Set a password for the login (or clear the business name to skip the login gate)."); return; }
+      out.access = { mode: a.mode, start: a.start || "", expiry: a.expiry || "", user: a.user || "", passHash: passHash, contact: a.contact || "" };
+      if (a.mode === "trial" && !a.expiry) { alert("A trial needs an expiry date — use the 7 / 14 day buttons or pick one."); return; }
+    }
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "client";
+    deliverFile(new Blob([JSON.stringify(out)], { type: "application/json" }),
+      "firespark-profile-" + slug + "-" + new Date().toISOString().slice(0, 10) + ".json", "application/json");
+  };
+}
+try {
+  const _fsDashRenderD = fsDashRender;
+  fsDashRender = function () {
+    _fsDashRenderD();
+    try {
+      const wrap = document.getElementById("fsDashView");
+      if (!wrap || document.getElementById("fsBuilderBtn")) return;
+      const b = document.createElement("button");
+      b.className = "fsbtn"; b.id = "fsBuilderBtn"; b.style.cssText = "margin:0 0 12px";
+      b.innerHTML = "&#128736; Client profile builder";
+      b.onclick = fsBuilderOpen;
+      wrap.insertBefore(b, wrap.children[1] || null);
+    } catch (e) {}
+  };
+} catch (e) {}
+
+/* belt-and-braces: apply modules + gate shortly after boot (profile may restore from IDB) */
+setTimeout(() => { try { fsApplyModules(); fsGateCheck(); } catch (e) {} }, 600);
+
 </script>
 </body>
 </html>
