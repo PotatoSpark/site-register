@@ -13,6 +13,7 @@
 <title>FireSpark Register</title>
 <script src="./qr.js" defer></script>
 <script src="./jsqr.js" defer></script>
+<script src="./zxing.js" defer></script>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html, body { height:100%; overflow:hidden; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:#1a1d21; color:#e8e8e8; }
@@ -165,7 +166,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.9 (fs 1.7)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.10 (fs 1.8)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -493,7 +494,8 @@
   <div class="modalbox" style="max-width:440px;width:94vw;text-align:left">
     <h3 id="fsQiTitle" style="margin-bottom:4px">QR tag</h3>
     <div id="fsQiCtx" style="font-size:12px;color:#8fa2ab;margin-bottom:6px"></div>
-    <label>Linked barcode (type or paste the number)</label><input type="text" id="fsQiBarcode" autocomplete="off">
+    <label>Linked barcode (type, paste, or scan it)</label>
+    <div style="display:flex;gap:6px"><input type="text" id="fsQiBarcode" autocomplete="off" style="flex:1"><button class="btn" id="fsQiBcScan" type="button">&#128247; Scan</button></div>
     <label>Zone</label><input type="text" id="fsQiZone" autocomplete="off">
     <label>Loop</label><input type="text" id="fsQiLoop" autocomplete="off">
     <label>Device number</label><input type="text" id="fsQiDev" autocomplete="off">
@@ -520,6 +522,14 @@
     <div id="fsLookStatus" style="font-size:13px;color:#aaa;margin-top:8px">Point the camera at a FireSpark QR label.</div>
     <div id="fsLookCard" style="display:none;border:1px solid #3a4047;border-radius:10px;padding:12px;margin-top:10px"></div>
     <div class="row" style="margin-top:10px"><button class="btn" id="fsLookClose">Close</button></div>
+  </div>
+</div>
+<div class="modal" id="fsBcModal" style="z-index:123">
+  <div class="modalbox" style="max-width:440px;width:94vw;text-align:left">
+    <h3 style="margin-bottom:6px">Scan a barcode</h3>
+    <video id="fsBcVideo" playsinline muted style="width:100%;border-radius:10px;background:#000;min-height:200px"></video>
+    <div id="fsBcStatus" style="font-size:13px;color:#aaa;margin-top:8px">Point the camera at the equipment barcode (QR works too).</div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="fsBcClose">Close</button></div>
   </div>
 </div>
 <div class="modal" id="annModal" style="z-index:121">
@@ -7098,6 +7108,96 @@ new MutationObserver(fsGrowAll).observe(document.getElementById("fsSiteView"), {
 
 /* ---------- register photo lightbox ---------- */
 let fsLbTarget = null;
+/* ---------- 1D barcode scanning (C17-gamma.1): ZXing 1D fallback everywhere + camera fill for the barcode field ---------- */
+let fsZxHints = null, fsZxReader = null;
+function fsZx1D(d2, w, h) {
+  if (typeof ZXing === "undefined") return null;
+  try {
+    const gray = new Uint8ClampedArray(w * h);
+    for (let i = 0, j = 0; j < gray.length; i += 4, j++)
+      gray[j] = (d2[i] * 66 + d2[i + 1] * 129 + d2[i + 2] * 25 + 4096) >> 8;
+    const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(new ZXing.RGBLuminanceSource(gray, w, h)));
+    if (!fsZxHints) {
+      fsZxHints = new Map();
+      fsZxHints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39, ZXing.BarcodeFormat.CODE_93, ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8, ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E, ZXing.BarcodeFormat.ITF, ZXing.BarcodeFormat.CODABAR]);
+      fsZxReader = new ZXing.MultiFormatReader();
+    }
+    const res = fsZxReader.decode(bmp, fsZxHints);
+    const t = res && res.getText ? String(res.getText()) : null;
+    return t || null;
+  } catch (e) { return null; }
+}
+function fsBcResolve(code) {
+  code = String(code || "").trim();
+  if (!code) return { ok: false, msg: "Nothing decoded" };
+  if (typeof fsRegister === "undefined" || !fsRegister || !(fsRegister.clients || []).length) return { ok: false, msg: "Load the register first — tags are looked up in it" };
+  let hit = null;
+  (fsRegister.clients || []).forEach(c => (c.sites || []).forEach(st2 => {
+    const chk = s2 => (s2.qrItems || []).forEach(x => { if (!hit && x.barcode && x.barcode === code) hit = { s: s2, it: x }; });
+    chk(st2);
+    (st2.buildings || []).forEach(chk);
+  }));
+  if (!hit) return { ok: false, msg: 'Not a FireSpark tag, and no QR tag lists "' + code.slice(0, 24) + '" as its barcode' };
+  return fsQrResolve("FS1|" + hit.s.id + "|" + hit.it.qid);
+}
+function fsBcToTag(bc) {
+  bc = String(bc || "").trim();
+  const s = (typeof fsSite !== "undefined") ? fsSite : null;
+  if (!s || !bc) return null;
+  const it = (s.qrItems || []).find(x => x.barcode && x.barcode === bc);
+  return it ? "FS1|" + s.id + "|" + it.qid : null;
+}
+let fsBcStream = null, fsBcRaf = null;
+function fsBcStop() {
+  if (fsBcRaf) cancelAnimationFrame(fsBcRaf);
+  fsBcRaf = null;
+  if (fsBcStream) { fsBcStream.getTracks().forEach(t2 => t2.stop()); fsBcStream = null; }
+  document.getElementById("fsBcModal").classList.remove("show");
+}
+function fsBcAccept(text) {
+  text = String(text || "").trim();
+  const st = document.getElementById("fsBcStatus");
+  if (/^FS1\|/.test(text)) { st.textContent = "That is a FireSpark QR label, not an equipment barcode — scan the code printed on the equipment itself."; return false; }
+  if (!text) return false;
+  document.getElementById("fsQiBarcode").value = text;
+  if (navigator.vibrate) navigator.vibrate(80);
+  fsBcStop();
+  return true;
+}
+function fsBcScanOpen() {
+  const st = document.getElementById("fsBcStatus");
+  document.getElementById("fsBcModal").classList.add("show");
+  if (typeof jsQR !== "function" && typeof ZXing === "undefined") { st.textContent = "Scanner not loaded yet — check your connection and reload once."; return; }
+  st.textContent = "Starting camera…";
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false }).then(stream => {
+    fsBcStream = stream;
+    const vid = document.getElementById("fsBcVideo");
+    vid.srcObject = stream;
+    vid.play().catch(() => {});
+    st.textContent = "Point the camera at the equipment barcode (QR works too).";
+    const cv2 = document.createElement("canvas");
+    const cx2 = cv2.getContext("2d", { willReadFrequently: true });
+    let hold = 0;
+    const loop = () => {
+      if (!fsBcStream) return;
+      if (vid.videoWidth && Date.now() > hold) {
+        cv2.width = vid.videoWidth; cv2.height = vid.videoHeight;
+        cx2.drawImage(vid, 0, 0);
+        const d2 = cx2.getImageData(0, 0, cv2.width, cv2.height);
+        const code = (typeof jsQR === "function") ? jsQR(d2.data, cv2.width, cv2.height, { inversionAttempts: "dontInvert" }) : null;
+        const text = (code && code.data) || fsZx1D(d2.data, cv2.width, cv2.height);
+        if (text) {
+          if (fsBcAccept(text)) return;
+          hold = Date.now() + 1400;
+        }
+      }
+      fsBcRaf = requestAnimationFrame(loop);
+    };
+    fsBcRaf = requestAnimationFrame(loop);
+  }).catch(() => { st.textContent = "Camera not available — allow camera access for this app and try again."; });
+}
+document.getElementById("fsBcClose").onclick = fsBcStop;
+document.getElementById("fsQiBcScan").onclick = fsBcScanOpen;
 /* ---------- QR register tags (Pass C17-gamma): first-class register objects, Details link, Resources lookup ---------- */
 const FS_WS_APP = false;   // register-only build: the workspace lives in the FireSpark app
 function fsQrNewId() { return "q" + Date.now().toString(36).slice(-4) + Math.random().toString(36).slice(2, 7); }
@@ -7432,8 +7532,10 @@ function fsQrLookStart() {
         cx2.drawImage(vid, 0, 0);
         const d2 = cx2.getImageData(0, 0, cv2.width, cv2.height);
         const code = jsQR(d2.data, cv2.width, cv2.height, { inversionAttempts: "dontInvert" });
-        if (code && code.data) {
-          const res = fsQrResolve(code.data);
+        let data = code && code.data;
+        if (!data) data = fsZx1D(d2.data, cv2.width, cv2.height);
+        if (data) {
+          const res = /^FS1\|/.test(String(data)) ? fsQrResolve(data) : fsBcResolve(data);
           if (res.ok) {
             if (navigator.vibrate) navigator.vibrate(80);
             st.textContent = "Found it — details below.";
