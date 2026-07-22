@@ -163,7 +163,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.7 (fs 1.5)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.8 (fs 1.6)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -231,7 +231,8 @@
     <button class="btn" id="btnFit" title="Fit the whole plan on screen">Fit all</button>
     <button class="btn" id="btnPageSpace" title="Add white space below the plan">Page +</button>
     <button class="btn" id="btnPageMinus" title="Remove added white space">Page &minus;</button>
-    <button class="btn" id="btnLabels" title="Show or hide symbol labels">&#127991; Labels</button>
+    <button class="btn" id="btnLabels" style="display:none" title="Show or hide symbol labels">&#127991; Labels</button>
+    <button class="btn" id="btnWsSet" title="Workspace settings">&#9881;</button>
     <button class="btn" id="btnZones" title="Zones — manage and colour zones">Zones</button>
     <button class="btn" id="btnNotes" title="Site notes">&#128221; Notes</button>
     <select id="levelSel" style="display:none;background:#2e333a;color:#e8e8e8;border:1px solid #444;border-radius:8px;padding:7px"></select>
@@ -585,6 +586,26 @@
     <div class="row" style="margin-top:14px"><button class="btn" id="fsFileClose">Close</button></div>
   </div>
 </div>
+<div class="modal" id="wsSetModal" style="z-index:121">
+  <div class="modalbox" style="max-width:470px;width:94vw;max-height:82vh;overflow-y:auto;text-align:left">
+    <h3 style="margin-bottom:12px">&#9881; Workspace settings</h3>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;margin-bottom:6px;cursor:pointer"><input type="checkbox" id="wsSetSelAfter"> After drawing a shape, switch to Select with it selected</label>
+    <div style="font-size:11.5px;color:#888;margin-bottom:12px">Show / hide overlays (labels, zones, tags, markups) live in the &#128065; Views side tab.</div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+      <span style="flex:1;font-size:13.5px;min-width:120px">Autosave: <b id="wsSetAutoT">&mdash;</b></span>
+      <button class="btn" id="wsSetAutoNow">&#128190; Autosave now</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+      <span style="flex:1;font-size:13.5px;min-width:120px">Version: <b id="wsSetVer"></b></span>
+      <button class="btn" id="wsSetUpd">&#8635; Check for updates</button>
+    </div>
+    <div style="border-top:1px solid #3a4047;padding-top:10px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px">Keyboard shortcuts (PC)</div>
+      <div style="font-size:11.5px;color:#999;line-height:1.7">DL line &middot; AR arrow &middot; RE rectangle &middot; EL ellipse &middot; CD cloud &middot; TX text &middot; PN pen &middot; HL highlighter &middot; HT hatch &middot; MV select &middot; PA pan &middot; TS test mode &middot; RO rotate 90&deg; &middot; CO duplicate &middot; AL align &middot; GP / UG group / ungroup &middot; FH / FV flip &middot; SS select same &middot; Shift = straight / 45&deg; snap &middot; Ctrl+Z / Ctrl+Y undo / redo</div>
+    </div>
+    <div class="row" style="margin-top:14px"><button class="btn" id="wsSetClose">Close</button></div>
+  </div>
+</div>
 <div class="modal" id="fsSettingsModal" style="z-index:120">
   <div class="modalbox" style="max-width:470px;width:94vw;max-height:82vh;overflow-y:auto;text-align:left">
     <h3 style="margin-bottom:14px">&#9881; Settings</h3>
@@ -597,6 +618,14 @@
       <button class="btn" id="fsBackupsBtn">&#128336; Backups</button>
     </div>
     <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;margin-bottom:12px;cursor:pointer"><input type="checkbox" id="fsResFade"> Colour-code the client list by due dates</label>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <span style="flex:1;font-size:13.5px">Open sites in maps with</span>
+      <select id="fsMapsApp" style="background:#2e333a;color:#e8e8e8;border:1px solid #444;border-radius:8px;padding:7px">
+        <option value="auto">Device default</option>
+        <option value="google">Google Maps</option>
+        <option value="waze">Waze</option>
+      </select>
+    </div>
     <div style="margin-bottom:12px">
       <div style="font-size:13.5px;margin-bottom:5px">Your name (stamped on register saves)</div>
       <input id="fsSetName" autocomplete="off" style="width:100%;box-sizing:border-box;padding:9px;border-radius:8px;border:1px solid #4a5057;background:#1a1d21;color:#eee;font-size:14px" placeholder="e.g. R. Smith">
@@ -872,7 +901,8 @@ const TABS = [
   { id:"bldg",   label:"Building" },
   { id:"markup", label:"Markup" },
   { id:"modify", label:"Modify" },
-  { id:"tools",  label:"Tools" }
+  { id:"tools",  label:"Tools" },
+  { id:"views",  label:"Views" }
 ];
 const PALETTE_COLORS = ["#d81e05", "#f2c200", "#1b8a3f", "#0057d8", "#111111", "#ffffff"];
 
@@ -1471,6 +1501,31 @@ function drawSym(c, o, scale) {
     c.restore();
   }
 
+  // Views-tab screen tags: QR-linked / photo dot (never on exports)
+  if (!exportPaint && (viewQrTag || viewPhotoDot) && t.glyph !== "campin") {
+    const dv = symDims(o);
+    if (viewQrTag && o.qid) {
+      const qfs = Math.max(8 * scale, o.size * scale * 0.3);
+      c.save();
+      c.font = "bold " + qfs + "px system-ui, sans-serif";
+      c.textAlign = "left"; c.textBaseline = "bottom";
+      const qx = x + (dv.w / 2) * scale + 1.5 * scale, qy = y - (dv.h / 2) * scale;
+      c.lineWidth = qfs * 0.28; c.strokeStyle = "#ffffff";
+      c.strokeText("QR", qx, qy);
+      c.fillStyle = "#1565c0";
+      c.fillText("QR", qx, qy);
+      c.restore();
+    }
+    if (viewPhotoDot && o.photo) {
+      const pr = Math.max(3 * scale, o.size * scale * 0.14);
+      c.save();
+      c.beginPath(); c.arc(x - (dv.w / 2) * scale, y - (dv.h / 2) * scale, pr, 0, Math.PI * 2);
+      c.fillStyle = "#1b8a3f"; c.fill();
+      c.strokeStyle = "#ffffff"; c.lineWidth = Math.max(1, pr * 0.35); c.stroke();
+      c.restore();
+    }
+  }
+
   // dBA value lines (always shown)
   if (t.glyph === "dba") {
     const fs = Math.max(8 * scale, o.size * scale * 0.34);
@@ -2022,6 +2077,7 @@ function hitObject(px, py) {
   const slack = Math.max(8 / view.scale, 4);
   for (let i = objects.length - 1; i >= 0; i--) {
     const o = objects[i];
+    if (viewHidden(o)) continue;
     if ((o.kind === "zone") !== (activeTool === "zones")) continue;   // zones only touchable in the Zones tool
     if (o.kind === "zone") {
       if (o.pts && o.pts.length > 2 && pointInPts(p.x, p.y, o.pts)) return o;
@@ -2232,7 +2288,7 @@ function draw() {
   ctx.save();
   ctx.translate(view.x, view.y);
   objects.forEach(o => { if (o.kind === "zone") drawObject(ctx, o, view.scale); });
-  objects.forEach(o => { if (o.kind !== "zone") drawObject(ctx, o, view.scale); });
+  objects.forEach(o => { if (o.kind !== "zone" && !viewHidden(o)) drawObject(ctx, o, view.scale); });
   if (tempShape) drawObject(ctx, tempShape, view.scale);
   selection.forEach(o => {
     ctx.strokeStyle = "#00e5ff"; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
@@ -2680,7 +2736,7 @@ function drawPalIcon(canvasEl, typeId) {
     size: bigGlyphs.includes(t.glyph) ? 14 : (t.glyph === "door" || t.glyph === "lstair" || t.glyph === "dba") ? 18 : 26 }, 1);
 }
 
-const TAB_ICONS = { fav:"★", fire:"🔥", exit:"🏃", elec:"⚡", bldg:"🏠", markup:"✏️", modify:"🔧", tools:"🧰" };
+const TAB_ICONS = { fav:"★", fire:"🔥", exit:"🏃", elec:"⚡", bldg:"🏠", markup:"✏️", modify:"🔧", tools:"🧰", views:"👁" };
 function buildTabs() {
   tabsEl.innerHTML = "";
   TABS.forEach(tb => {
@@ -2844,9 +2900,46 @@ function entriesForTab(tab) {
   return out;
 }
 
+
+/* ---- Views tab (C17-beta): show/hide screen aids. Screen only - exports and reports never change. ---- */
+function viewsToggleDefs() {
+  return [
+    { id:"vw_labels", icon:"\u{1F3F7}", label:"Device labels", get:() => labelsOn, set:v => { labelsOn = v; refreshLabelsBtn(); } },
+    { id:"vw_zones", icon:"▧", label:"Zones", get:() => zonesShow, set:v => { zonesShow = v; const zc = document.getElementById("znShow"); if (zc) zc.checked = v; } },
+    { id:"vw_prevyear", icon:"\u{1F4C5}", label:"Last-year tags", get:() => testPrevOn, set:v => { testPrevOn = v; const tc = document.getElementById("testPrevOn"); if (tc) tc.checked = v; try { localStorage.setItem("bpm-prevyear", v ? "1" : "0"); } catch (e) {} } },
+    { id:"vw_qr", icon:'<span style="font-size:13px;font-weight:800;color:#1565c0">QR</span>', label:"QR-linked tag", get:() => viewQrTag, set:v => { viewQrTag = v; try { localStorage.setItem("bpm-viewqr", v ? "1" : "0"); } catch (e) {} } },
+    { id:"vw_photodot", icon:"\u{1F4F7}", label:"Photo dot", get:() => viewPhotoDot, set:v => { viewPhotoDot = v; try { localStorage.setItem("bpm-viewphotodot", v ? "1" : "0"); } catch (e) {} } },
+    { id:"vw_markups", icon:"✏️", label:"Markups", get:() => viewMarkups, set:v => { viewMarkups = v; try { localStorage.setItem("bpm-viewmarkups", v ? "1" : "0"); } catch (e) {} if (!v) setSelection(selection.filter(o => !viewHidden(o))); } },
+    { id:"vw_pins", icon:"\u{1F4CD}", label:"Photo pins", get:() => viewPins, set:v => { viewPins = v; try { localStorage.setItem("bpm-viewpins", v ? "1" : "0"); } catch (e) {} if (!v) setSelection(selection.filter(o => !viewHidden(o))); } }
+  ];
+}
+function buildViewsPanel() {
+  const note = document.createElement("div");
+  note.style.cssText = "font-size:10.5px;color:#888;padding:4px 8px;max-width:120px;flex:0 0 auto";
+  note.textContent = "Show / hide on screen only. Exports and reports are never affected.";
+  paletteEl.appendChild(note);
+  viewsToggleDefs().forEach(tg => {
+    const d = document.createElement("div");
+    d.className = "pal" + (tg.get() ? " active" : "");
+    d.id = "pal-" + tg.id;
+    d.title = "Show or hide: " + tg.label;
+    d.innerHTML = '<div class="sym">' + tg.icon + '</div>';
+    const lbl = document.createElement("div");
+    lbl.className = "lbl";
+    lbl.textContent = tg.label;
+    d.appendChild(lbl);
+    const cnt = document.createElement("div");
+    cnt.className = "cnt";
+    cnt.textContent = tg.get() ? "on" : "off";
+    d.appendChild(cnt);
+    d.onclick = () => { tg.set(!tg.get()); buildPalette(); draw(); };
+    paletteEl.appendChild(d);
+  });
+}
 function buildPalette() {
   refreshTabs();
   paletteEl.innerHTML = "";
+  if (activeTab === "views") { buildViewsPanel(); updateStatus(); return; }
   const entries = entriesForTab(activeTab);
   if (!entries.length) {
     const hint = document.createElement("div");
@@ -3116,6 +3209,11 @@ function updateTestCounter() {
 }
 function setTool(id) {
   activeTool = id;
+  if (!viewMarkups && (id === "hatch" || MARKUP_TOOLS.some(m => m.id === id))) {
+    viewMarkups = true; try { localStorage.setItem("bpm-viewmarkups", "1"); } catch (e) {}
+    if (activeTab === "views") buildPalette();
+    setTimeout(() => { statusEl.textContent = "Markups shown again (Views tab) so you can draw"; }, 0);   // after setTool's own status update
+  }
   document.getElementById("styleWrap").style.display =
     ["line", "arrow", "rect", "ellipse"].includes(id) ? "flex" : "none";
   document.getElementById("endWrap").style.display =
@@ -3178,7 +3276,29 @@ try { const le = JSON.parse(localStorage.getItem("bpm-lineends") || "null"); if 
 function saveLineEnds() { try { localStorage.setItem("bpm-lineends", JSON.stringify(lineEnds)); } catch (e) {} }
 let selAfterDraw = localStorage.getItem("bpm-selafter") !== "0";   // default ON: drawing a shape selects it straight away
 document.getElementById("selAfterOn").checked = selAfterDraw;
-document.getElementById("selAfterOn").onchange = ev => { selAfterDraw = ev.target.checked; localStorage.setItem("bpm-selafter", selAfterDraw ? "1" : "0"); };
+document.getElementById("selAfterOn").onchange = ev => { selAfterDraw = ev.target.checked; localStorage.setItem("bpm-selafter", selAfterDraw ? "1" : "0"); const wsc = document.getElementById("wsSetSelAfter"); if (wsc) wsc.checked = selAfterDraw; };
+/* C17-beta: workspace settings cog */
+let wsLastAutoT = null;
+document.getElementById("btnWsSet").onclick = () => {
+  document.getElementById("wsSetSelAfter").checked = selAfterDraw;
+  const vb = document.getElementById("fsVerBadge");
+  document.getElementById("wsSetVer").textContent = vb ? vb.textContent : "";
+  document.getElementById("wsSetAutoT").textContent = wsLastAutoT ? "last ran " + new Date(wsLastAutoT).toLocaleTimeString() : "runs every 30 s while you work";
+  document.getElementById("wsSetModal").classList.add("show");
+};
+document.getElementById("wsSetClose").onclick = () => document.getElementById("wsSetModal").classList.remove("show");
+document.getElementById("wsSetSelAfter").onchange = ev => {
+  selAfterDraw = ev.target.checked;
+  localStorage.setItem("bpm-selafter", selAfterDraw ? "1" : "0");
+  document.getElementById("selAfterOn").checked = selAfterDraw;
+};
+document.getElementById("wsSetAutoNow").onclick = async () => {
+  autosaveDirty = true;
+  try { await autosaveNow(); } catch (e) {}
+  document.getElementById("wsSetAutoT").textContent = wsLastAutoT ? "last ran " + new Date(wsLastAutoT).toLocaleTimeString() : "nothing to save yet";
+};
+document.getElementById("wsSetUpd").onclick = () => { const b = document.getElementById("fsSetUpd"); if (b && b.onclick) b.onclick(); };
+
 function applyEndSel(which, val) {
   if (activeTool === "line" || activeTool === "arrow") { lineEnds[activeTool][which] = val; saveLineEnds(); }
   const targets = selection.filter(o => o.kind === "shape" && (o.shape === "line" || o.shape === "arrow"));
@@ -3217,6 +3337,20 @@ document.getElementById("hatchStyleSel").addEventListener("change", e => {
    locked background shapes. Auto-assignment never clears a zone and never touches a
    device whose zone was typed by hand (o.zoneMan). Smallest zone wins when nested. */
 let zonesShow = true;
+/* C17-beta Views-tab state - screen-only aids, never applied to exports */
+let viewQrTag = false, viewPhotoDot = false, viewMarkups = true, viewPins = true;
+try { viewQrTag = localStorage.getItem("bpm-viewqr") === "1"; } catch (e) {}
+try { viewPhotoDot = localStorage.getItem("bpm-viewphotodot") === "1"; } catch (e) {}
+try { viewMarkups = localStorage.getItem("bpm-viewmarkups") !== "0"; } catch (e) {}
+try { viewPins = localStorage.getItem("bpm-viewpins") !== "0"; } catch (e) {}
+let exportPaint = false;   // true while an export canvas renders
+const MARKUP_KINDS = { ink:1, shape:1, callout:1, text:1, img:1 };
+function viewHidden(o) {
+  if (exportPaint) return false;
+  if (!viewMarkups && MARKUP_KINDS[o.kind]) return true;
+  if (!viewPins && o.kind === "sym" && o.type === "campin") return true;
+  return false;
+}
 function zonesList() { return objects.filter(o => o.kind === "zone"); }
 function pointInPts(x, y, pts) {
   let ins = false;
@@ -3860,6 +3994,7 @@ async function autosaveNow() {
       const en = ix.find(x => x.id === currentProjId);
       if (en) { en.t = Date.now(); en.thumb = makeThumb(); await idbPut("projIndex", ix); }
     }
+    wsLastAutoT = Date.now();
     noteSaved("Autosaved");
   } catch (e) {
     noteSaved("\u26a0 AUTOSAVE FAILED");
@@ -5088,7 +5223,7 @@ function endPointer(e) {
       const a = toImage(Math.min(marquee.x1, marquee.x2), Math.min(marquee.y1, marquee.y2));
       const b = toImage(Math.max(marquee.x1, marquee.x2), Math.max(marquee.y1, marquee.y2));
       let hits = objects.filter(o => {
-        if (o.kind === "zone") return false;
+        if (o.kind === "zone" || viewHidden(o)) return false;
         const bb = objectBounds(o);
         return bb.x1 < b.x && bb.x2 > a.x && bb.y1 < b.y && bb.y2 > a.y;
       });
@@ -5816,6 +5951,10 @@ window.addEventListener("keydown", e => {
 
 /* ================= Export ================= */
 function renderExportCanvas() {
+  exportPaint = true;   // Views toggles are screen aids - exports always show everything
+  try { return renderExportCanvasInner(); } finally { exportPaint = false; }
+}
+function renderExportCanvasInner() {
   const out = document.createElement("canvas");
   out.width = img.naturalWidth;
   out.height = img.naturalHeight;
@@ -6383,7 +6522,7 @@ function fsRenderSite() {
   html += '<h1 style="font-size:32px;font-weight:700;margin:2px 0 4px">' + fsEsc(s.name) + '</h1>';
   if (addr) html += '<div style="color:var(--fs-sub);font-size:15px">' + fsEsc(addr) + '</div>';
   html += '</div><div style="display:flex;gap:10px;align-items:center;padding-top:22px">';
-  if (s.mapUrl) html += '<button class="fsbtn" id="fsMapBtn">Open in maps</button>';
+  if (s.mapUrl || (s.address || "").trim() || s.geo) html += '<button class="fsbtn" id="fsMapBtn">Open in maps</button>';
   html += '<span style="font-size:12.5px;color:var(--fs-sub2);align-self:center">Plans &amp; testing live in the FireSpark app</span></div></div>';
 
   // status strip - compact (testing info shouldn't steal the show; Overview is the main event)
@@ -6422,7 +6561,8 @@ function fsRenderSite() {
       fsRenderSite();
     } else { fsRenderSites(); fsShow("fsSitesView"); }
   };
-  if (s.mapUrl) document.getElementById("fsMapBtn").onclick = () => window.open(s.mapUrl, "_blank");
+  const fsMapB = document.getElementById("fsMapBtn");
+  if (fsMapB) fsMapB.onclick = () => window.open(s.mapUrl && fsMapsApp() !== "waze" ? s.mapUrl : fsMapsNavUrl(s), "_blank");
   const fsOwsBtn = document.getElementById("fsOpenWs");
   if (fsOwsBtn) fsOwsBtn.onclick = fsEnterWorkspace;
   document.querySelectorAll(".fsCycDate").forEach(inp => {
@@ -7740,11 +7880,13 @@ document.getElementById("fsResAnnuals").onclick = () => { document.getElementByI
 document.getElementById("fsSettingsBtn").onclick = () => {
   document.getElementById("fsResFade").checked = fsFadeOn();
   try { document.getElementById("fsSetName").value = localStorage.getItem("fs-user") || ""; } catch (e) {}
+  try { document.getElementById("fsMapsApp").value = fsMapsApp(); } catch (e) {}
   const vb = document.getElementById("fsVerBadge");
   document.getElementById("fsSetVer").textContent = vb ? vb.textContent : "";
   document.getElementById("fsSettingsModal").classList.add("show");
 };
 document.getElementById("fsSetClose").onclick = () => document.getElementById("fsSettingsModal").classList.remove("show");
+document.getElementById("fsMapsApp").onchange = e => { try { localStorage.setItem("fs-mapsapp", e.target.value); } catch (er) {} };
 document.getElementById("fsSetName").addEventListener("change", e => {
   try { localStorage.setItem("fs-user", e.target.value.trim()); } catch (er) {}
 });
@@ -9029,14 +9171,21 @@ function fsPlGridDoc() {
   xml += '</w:tbl>' + P(fsDocBrand() + " planner \u2014 exported " + new Date().toISOString().slice(0, 10), { sz: 15, col: "888888" });
   deliverFile(fsDocxBlob(xml), "plan-calendar-" + fsPlMonth + ".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
 }
-function fsPlNav(s) {
+function fsMapsApp() { try { return localStorage.getItem("fs-mapsapp") || "auto"; } catch (e) { return "auto"; } }
+function fsMapsNavUrl(s) {
   // navigate by ADDRESS when we have one - maps apps resolve street addresses to the exact
   // building, whereas our geocoded coords can sit on the road segment (Reece: wrong site)
-  const apple = /iPad|iPhone/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && "ontouchend" in document);
-  const dest = (s.address || "").trim() ? encodeURIComponent(s.address.trim())
+  const addr = (s.address || "").trim();
+  const dest = addr ? encodeURIComponent(addr)
     : (s.geo ? s.geo.lat + "," + s.geo.lng : encodeURIComponent(s.name || ""));
-  window.open(apple ? "https://maps.apple.com/?daddr=" + dest : "https://www.google.com/maps/dir/?api=1&destination=" + dest, "_blank");
+  const app = fsMapsApp();
+  if (app === "google") return "https://www.google.com/maps/dir/?api=1&destination=" + dest;
+  if (app === "waze") return (addr || !s.geo) ? "https://www.waze.com/ul?q=" + dest + "&navigate=yes"
+    : "https://www.waze.com/ul?ll=" + s.geo.lat + "," + s.geo.lng + "&navigate=yes";
+  const apple = /iPad|iPhone/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && "ontouchend" in document);
+  return apple ? "https://maps.apple.com/?daddr=" + dest : "https://www.google.com/maps/dir/?api=1&destination=" + dest;
 }
+function fsPlNav(s) { window.open(fsMapsNavUrl(s), "_blank"); }
 async function fsPlUpdateTravel(relocate) {
   if (fsPlBusy) return;
   if (relocate && !confirm("Re-locate ALL sites from their addresses and rebuild every travel time?\nUse this after fixing addresses. Needs internet - takes about a second per site.")) return;
