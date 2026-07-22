@@ -166,7 +166,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.10.1 (fs 1.8.1)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.10.2 (fs 1.8.2)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -1070,7 +1070,7 @@ function symDims(o) {   // image-space width/height (before rotation)
   else if (t.glyph === "gpo") { w = s * (t.dbl ? 1.2 : 0.95); h = s * 1.05; }
   else if (t.glyph === "datap") { w = s * (t.dbl ? 1.25 : 0.95); h = s * 1.1; }
   else if (t.glyph === "msensor") { w = s * 1.5; h = s * 1.5; }
-  else if (t.glyph === "hreel") { w = s * 1.35; h = s * 1.15; }
+  else if (t.glyph === "hreel") { w = s * 1.35; h = s * 1.2; }
   else if (t.glyph === "exting") { w = s * 0.98; h = s * 1.25; }
   const rr = ((o.rot || 0) % 360) * Math.PI / 180;
   if (rr) {
@@ -1385,7 +1385,7 @@ function drawSym(c, o, scale) {
     const r = s * 0.48;
     c.strokeStyle = col; c.lineWidth = Math.max(1.4, s * 0.085); c.lineCap = "round"; c.lineJoin = "round";
     c.beginPath();
-    for (let k = 0; k <= 96; k++) {
+    for (let k = -6; k <= 96; k++) {
       const tt = k / 96;
       const a = -Math.PI / 2 + tt * Math.PI * 2 * 2.6;
       const rr = r * (1 - 0.82 * tt);
@@ -1394,12 +1394,12 @@ function drawSym(c, o, scale) {
     }
     c.stroke();
     const ny = -r + s * 0.06;
-    c.beginPath(); c.moveTo(0, ny - s * 0.10); c.lineTo(0, ny + s * 0.08); c.stroke();
+    c.beginPath(); c.moveTo(0, ny - s * 0.12); c.lineTo(0, ny + s * 0.08); c.stroke();
     c.beginPath();
-    c.moveTo(s * 0.04, ny - s * 0.08); c.lineTo(s * 0.56, ny - s * 0.035);
-    c.moveTo(s * 0.04, ny + s * 0.05); c.lineTo(s * 0.56, ny + s * 0.005);
-    c.stroke();
-    c.beginPath(); c.moveTo(s * 0.62, ny - s * 0.10); c.lineTo(s * 0.62, ny + s * 0.045); c.stroke();
+    c.moveTo(s * 0.04, ny - s * 0.10); c.lineTo(s * 0.58, ny - s * 0.035);
+    c.lineTo(s * 0.58, ny + s * 0.035); c.lineTo(s * 0.04, ny + s * 0.07);
+    c.closePath(); c.fillStyle = col; c.fill();
+    c.beginPath(); c.moveTo(s * 0.62, ny - s * 0.055); c.lineTo(s * 0.62, ny + s * 0.02); c.stroke();
   } else if (t.glyph === "exting") {
     // C17: extinguisher - body in symbol colour, black top hardware + horn,
     // band colour set by the Details "Type" selector (o.xt, see XT_BANDS)
