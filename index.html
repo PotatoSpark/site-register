@@ -11,6 +11,8 @@
 <link rel="apple-touch-icon" href="icon-180.png">
 <meta name="theme-color" content="#23272d">
 <title>FireSpark Register</title>
+<script src="./qr.js" defer></script>
+<script src="./jsqr.js" defer></script>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html, body { height:100%; overflow:hidden; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:#1a1d21; color:#e8e8e8; }
@@ -163,7 +165,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.8 (fs 1.6)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.9 (fs 1.7)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -406,6 +408,7 @@
       </div>
       <input type="file" id="dPhotoInput" accept="image/*">
     </div>
+    <div id="qrWrap" style="display:none;margin-top:10px"></div>
     <div class="row">
       <button class="btn" id="detailsCancel">Cancel</button>
       <button class="btn primary" id="detailsSave">Save</button>
@@ -486,6 +489,39 @@
   </div>
 </div>
 
+<div class="modal" id="fsQrItemModal" style="z-index:121">
+  <div class="modalbox" style="max-width:440px;width:94vw;text-align:left">
+    <h3 id="fsQiTitle" style="margin-bottom:4px">QR tag</h3>
+    <div id="fsQiCtx" style="font-size:12px;color:#8fa2ab;margin-bottom:6px"></div>
+    <label>Linked barcode (type or paste the number)</label><input type="text" id="fsQiBarcode" autocomplete="off">
+    <label>Zone</label><input type="text" id="fsQiZone" autocomplete="off">
+    <label>Loop</label><input type="text" id="fsQiLoop" autocomplete="off">
+    <label>Device number</label><input type="text" id="fsQiDev" autocomplete="off">
+    <label>Device details</label><input type="text" id="fsQiInfo" autocomplete="off">
+    <div style="margin-top:10px">
+      <label>QR photo (stays on this tag &mdash; never added to the plan)</label>
+      <img id="fsQiPhotoPrev" style="display:none;max-width:120px;max-height:120px;border:1px solid #555;border-radius:6px;margin:4px 0">
+      <div style="display:flex;gap:8px">
+        <button class="btn" id="fsQiPhotoAdd">&#128247; Add photo</button>
+        <button class="btn" id="fsQiPhotoRemove" style="display:none">Remove</button>
+      </div>
+      <input type="file" id="fsQiPhotoInput" accept="image/*">
+    </div>
+    <div class="row">
+      <button class="btn" id="fsQiCancel">Cancel</button>
+      <button class="btn primary" id="fsQiSave">Save</button>
+    </div>
+  </div>
+</div>
+<div class="modal" id="fsLookModal" style="z-index:122">
+  <div class="modalbox" style="max-width:440px;width:94vw;text-align:left">
+    <h3 style="margin-bottom:6px">Scan a QR tag</h3>
+    <video id="fsLookVideo" playsinline muted style="width:100%;border-radius:10px;background:#000;min-height:200px"></video>
+    <div id="fsLookStatus" style="font-size:13px;color:#aaa;margin-top:8px">Point the camera at a FireSpark QR label.</div>
+    <div id="fsLookCard" style="display:none;border:1px solid #3a4047;border-radius:10px;padding:12px;margin-top:10px"></div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="fsLookClose">Close</button></div>
+  </div>
+</div>
 <div class="modal" id="annModal" style="z-index:121">
   <div class="modalbox" style="max-width:560px;width:96vw;max-height:86vh;overflow-y:auto;text-align:left">
     <h3 style="margin-bottom:4px">&#128203; Fire Alarm Annuals converter</h3>
@@ -568,6 +604,7 @@
     <button class="btn" id="fsResMeter" style="width:100%;text-align:left;margin-bottom:8px">&#127908; Sound meter (indicative &mdash; not calibrated)</button>
     <button class="btn" id="fsResAnnuals" style="width:100%;text-align:left;margin-bottom:8px">&#128203; Fire Alarm Annuals converter</button>
     <button class="btn" id="fsResPa" style="width:100%;text-align:left;margin-bottom:8px">&#128226; PA announcements &mdash; record &amp; play</button>
+    <button class="btn" id="fsResScan" style="width:100%;text-align:left;margin-bottom:8px">&#128269; Scan QR tag &mdash; find a device</button>
     <!-- isolation gate hidden for V1.0 - set display:flex (and restore fsIsoGateOn) to reinstate --><label style="display:none;align-items:center;gap:8px;font-size:13.5px;margin-bottom:14px;cursor:pointer"><input type="checkbox" id="fsResIso"> Isolation restore gate on tests</label>
     <div style="font-weight:700;font-size:13px;color:#7ddb8f;margin-bottom:6px">LIBRARY</div>
     <div style="font-size:12px;color:#999;margin-bottom:8px">Reference documents (standards, manuals). Stored on this device only &mdash; add them once per device.</div>
@@ -5393,6 +5430,7 @@ function openDetails() {
   ph.onclick = () => { if (syms[0].photo) openPhotoViewer(syms[0]); };
   document.getElementById("dPhotoRemove").style.display = photo ? "inline-block" : "none";
   document.getElementById("photoWrap").style.display = multi ? "none" : "block";
+  fsDetQrRender(syms);
   detailsModal.classList.add("show");
 }
 document.getElementById("btnDetails").onclick = openDetails;
@@ -6544,7 +6582,7 @@ function fsRenderSite() {
   // tabs
   const tabs = [["overview", "Overview"]];
   if (!fsParentSite) tabs.push(["buildings", "Buildings" + ((s.buildings || []).length ? " (" + s.buildings.length + ")" : "")]);
-  tabs.push(["equip", "Site Equipment"], ["history", "Test history"], ["defects", "Defects"], ["files", "Files & photos"]);
+  tabs.push(["equip", "Site Equipment"], ["history", "Test history"], ["defects", "Defects"], ["qr", "QR tags" + ((s.qrItems || []).length ? " (" + s.qrItems.length + ")" : "")], ["files", "Files & photos"]);
   html += '<div class="fscard" style="padding:0 20px"><div style="display:flex;overflow-x:auto">';
   tabs.forEach(([id, label]) => {
     html += '<div class="fstab' + (fsTab === id ? ' on' : '') + '" data-tab="' + id + '">' + label + '</div>';
@@ -6714,6 +6752,33 @@ function fsRenderTab() {
     }
     html += '</div>';
   }
+  if (fsTab === "qr") {
+    const qits = s.qrItems || [];
+    html += '<div class="fscard" style="padding:20px">';
+    html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px"><h3 style="font-size:16px;font-weight:700;flex:1">QR tags</h3>';
+    if (qits.length) html += '<button class="fsbtn" id="fsQrSheetBtn">&#128424; Label sheet PDF</button>';
+    html += '<button class="fsbtnP" id="fsQrAddBtn">+ Add QR tag</button></div>';
+    if (!qits.length) html += '<div style="color:var(--fs-faint);font-size:13.5px">No QR tags yet. Add one here (device details, barcode, QR photo, printable label), or create one from a device on the plan (double-tap the device &rarr; Details). Scan any printed tag from &#128218; Resources to look it up from anywhere.</div>';
+    qits.forEach((it, i) => {
+      const pl = fsQrItemPlaced(s, it.qid);
+      const parts = [];
+      if (it.zone) parts.push("Z" + it.zone);
+      if (it.loop) parts.push("L" + it.loop);
+      if (it.dev) parts.push("D" + it.dev);
+      html += '<div style="border-top:1px solid var(--fs-border);padding:10px 0;display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">';
+      html += it.photo
+        ? '<img src="' + it.photo + '" class="fsQrPh" data-i="' + i + '" style="width:64px;height:64px;object-fit:cover;border-radius:8px;cursor:pointer" title="Tap to view">'
+        : '<div style="width:64px;height:64px;border:1px dashed var(--fs-border);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--fs-faint);font-size:11px">no photo</div>';
+      html += '<div style="flex:1;min-width:170px">';
+      html += '<div style="font-size:14px;font-weight:700">' + (parts.join(" &middot; ") || "&mdash;") + (it.info ? ' <span style="font-weight:400;color:var(--fs-sub)">' + fsEsc(it.info) + '</span>' : '') + '</div>';
+      html += '<div style="font-size:12px;color:var(--fs-sub2)">tag ' + fsEsc(it.qid) + (it.barcode ? ' &middot; barcode ' + fsEsc(it.barcode) : '') + '</div>';
+      html += '<div style="font-size:12px;font-weight:700;color:' + (pl ? '#1b8a3f' : 'var(--fs-sub2)') + '">' + (pl ? '&#128205; On the plan &middot; ' + fsEsc(pl.name) : 'Not placed on a plan') + '</div>';
+      html += '</div><div style="display:flex;gap:6px">';
+      html += '<button class="fsbtn fsQrEd" data-i="' + i + '">&#9998; Edit</button>';
+      html += '<button class="fsbtn fsQrDel" data-i="' + i + '" style="color:#c62828">&#10005;</button></div></div>';
+    });
+    html += '</div>';
+  }
   if (fsTab === "files") {
     html += '<div class="fscard" style="padding:20px">';
     html += '<div style="display:flex;align-items:center;margin-bottom:10px"><h3 style="font-size:16px;font-weight:700;flex:1">Files &amp; photos</h3><button class="fsbtn" id="fsFilesAdd">&#128247; Add photo</button></div>';
@@ -6731,6 +6796,8 @@ function fsRenderTab() {
   }
 
   body.innerHTML = html;
+
+  if (fsTab === "qr") fsQrTabWire(s);
 
   if (fsTab === "overview") {
     document.getElementById("fsInfoEditBtn").onclick = () => {
@@ -7031,6 +7098,365 @@ new MutationObserver(fsGrowAll).observe(document.getElementById("fsSiteView"), {
 
 /* ---------- register photo lightbox ---------- */
 let fsLbTarget = null;
+/* ---------- QR register tags (Pass C17-gamma): first-class register objects, Details link, Resources lookup ---------- */
+const FS_WS_APP = false;   // register-only build: the workspace lives in the FireSpark app
+function fsQrNewId() { return "q" + Date.now().toString(36).slice(-4) + Math.random().toString(36).slice(2, 7); }
+function fsQrPaint(c2, text, x, y, size) {
+  const qr = qrcode(0, "M");
+  qr.addData(text); qr.make();
+  const nMod = qr.getModuleCount(), cell = size / nMod;
+  c2.fillStyle = "#ffffff"; c2.fillRect(x, y, size, size);
+  c2.fillStyle = "#000000";
+  for (let r = 0; r < nMod; r++)
+    for (let col = 0; col < nMod; col++)
+      if (qr.isDark(r, col)) c2.fillRect(x + col * cell, y + r * cell, Math.ceil(cell), Math.ceil(cell));
+}
+function fsQrItemPlaced(s, qid) {
+  if (!s || !qid) return null;
+  if (FS_WS_APP && typeof fsSiteCtx !== "undefined" && fsSiteCtx && fsSiteCtx.siteId === s.id && typeof findLevelSets === "function") {
+    let hit = null;
+    try { findLevelSets().forEach(set => (set.objects || []).forEach(o => { if (o && o.qid === qid) hit = { li: set.li, name: set.name || ("Level " + (set.li + 1)) }; })); } catch (e) {}
+    if (hit) return hit;
+  }
+  const pl = s.plan;
+  if (pl && pl.levels) for (let i = 0; i < pl.levels.length; i++) {
+    const lv = pl.levels[i];
+    if ((lv.objects || []).some(o => o && o.qid === qid)) return { li: i, name: lv.name || ("Level " + (i + 1)) };
+  }
+  return null;
+}
+let fsQiSite = null, fsQiItem = null, fsQiPhoto;
+function fsQrItemOpen(s, item) {
+  fsQiSite = s; fsQiItem = item || null; fsQiPhoto = undefined;
+  document.getElementById("fsQiTitle").textContent = item ? "Edit QR tag" : "New QR tag";
+  const crumbs = [];
+  try { if (typeof fsClient !== "undefined" && fsClient) crumbs.push(fsClient.name); } catch (e) {}
+  try { if (typeof fsParentSite !== "undefined" && fsParentSite && fsParentSite !== s) crumbs.push(fsParentSite.name); } catch (e) {}
+  crumbs.push(s.name);
+  document.getElementById("fsQiCtx").innerHTML = fsEsc(crumbs.join(" · ")) + (item ? " &middot; tag " + fsEsc(item.qid) : "");
+  document.getElementById("fsQiBarcode").value = item && item.barcode || "";
+  document.getElementById("fsQiZone").value = item && item.zone || "";
+  document.getElementById("fsQiLoop").value = item && item.loop || "";
+  document.getElementById("fsQiDev").value = item && item.dev || "";
+  document.getElementById("fsQiInfo").value = item && item.info || "";
+  const pv = document.getElementById("fsQiPhotoPrev");
+  pv.src = item && item.photo || "";
+  pv.style.display = item && item.photo ? "block" : "none";
+  pv.style.cursor = "pointer";
+  pv.onclick = () => { if (fsQiItem && fsQiItem.photo) fsViewPhoto(fsQiItem.photo); };
+  document.getElementById("fsQiPhotoRemove").style.display = item && item.photo ? "inline-block" : "none";
+  document.getElementById("fsQrItemModal").classList.add("show");
+}
+document.getElementById("fsQiCancel").onclick = () => { document.getElementById("fsQrItemModal").classList.remove("show"); fsQiSite = null; fsQiItem = null; };
+document.getElementById("fsQiPhotoAdd").onclick = () => document.getElementById("fsQiPhotoInput").click();
+document.getElementById("fsQiPhotoInput").addEventListener("change", e => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const im = new Image();
+    im.onload = () => {
+      const mx = 1600, sc = Math.min(1, mx / Math.max(im.naturalWidth, im.naturalHeight));
+      const c = document.createElement("canvas");
+      c.width = Math.round(im.naturalWidth * sc); c.height = Math.round(im.naturalHeight * sc);
+      c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+      fsQiPhoto = c.toDataURL("image/jpeg", 0.82);
+      const pv = document.getElementById("fsQiPhotoPrev");
+      pv.src = fsQiPhoto; pv.style.display = "block";
+      document.getElementById("fsQiPhotoRemove").style.display = "inline-block";
+    };
+    im.onerror = () => alert("Couldn't read that photo (HEIC from the Files app? Convert it to JPEG first).");
+    im.src = reader.result;
+  };
+  reader.readAsDataURL(f);
+});
+document.getElementById("fsQiPhotoRemove").onclick = () => {
+  fsQiPhoto = null;
+  document.getElementById("fsQiPhotoPrev").style.display = "none";
+  document.getElementById("fsQiPhotoRemove").style.display = "none";
+};
+document.getElementById("fsQiSave").onclick = () => {
+  if (!fsQiSite) { document.getElementById("fsQrItemModal").classList.remove("show"); return; }
+  const it = fsQiItem || { qid: fsQrNewId(), t: Date.now() };
+  it.barcode = document.getElementById("fsQiBarcode").value.trim();
+  it.zone = document.getElementById("fsQiZone").value.trim();
+  it.loop = document.getElementById("fsQiLoop").value.trim();
+  it.dev = document.getElementById("fsQiDev").value.trim();
+  it.info = document.getElementById("fsQiInfo").value.trim();
+  if (fsQiPhoto !== undefined) { if (fsQiPhoto === null) delete it.photo; else it.photo = fsQiPhoto; }
+  if (!fsQiItem) { fsQiSite.qrItems = fsQiSite.qrItems || []; fsQiSite.qrItems.push(it); }
+  fsMarkDirty();
+  document.getElementById("fsQrItemModal").classList.remove("show");
+  fsQiSite = null; fsQiItem = null;
+  try {
+    if (document.getElementById("fsReg").style.display !== "none" && typeof fsTab !== "undefined" && fsTab === "qr" && typeof fsSite !== "undefined" && fsSite) fsRenderSite();
+  } catch (e) {}
+  try { if (detailsModal.classList.contains("show") && detailsTargets.length) fsDetQrRender(detailsTargets.filter(o => o.kind === "sym")); } catch (e) {}
+};
+function fsQrTabWire(s) {
+  const items = s.qrItems || [];
+  const add = document.getElementById("fsQrAddBtn");
+  if (add) add.onclick = () => fsQrItemOpen(s, null);
+  const sheet = document.getElementById("fsQrSheetBtn");
+  if (sheet) sheet.onclick = () => fsQrItemSheet(s);
+  document.querySelectorAll(".fsQrEd").forEach(b => b.onclick = () => fsQrItemOpen(s, items[+b.dataset.i]));
+  document.querySelectorAll(".fsQrPh").forEach(im => im.onclick = () => { const it = items[+im.dataset.i]; if (it && it.photo) fsViewPhoto(it.photo); });
+  document.querySelectorAll(".fsQrDel").forEach(b => b.onclick = () => {
+    const it = items[+b.dataset.i];
+    if (!it) return;
+    if (!confirm("Delete this QR tag from the register? A device linked to it on the plan keeps working as a plain label tag.")) return;
+    items.splice(+b.dataset.i, 1);
+    fsMarkDirty(); fsRenderSite();
+  });
+}
+function fsQrItemSheet(s) {
+  if (typeof qrcode !== "function") { alert("QR generator not loaded yet — check your connection and reload once."); return; }
+  const items = s.qrItems || [];
+  if (!items.length) { alert("No QR tags on this site yet."); return; }
+  const W = 1240, H = 1754, M2 = 40, COLS = 4, ROWS = 8;
+  const cw = (W - M2 * 2) / COLS, ch = (H - M2 * 2) / ROWS;
+  const pages = [];
+  let c2 = null;
+  items.forEach((it, idx) => {
+    const slot = idx % (COLS * ROWS);
+    if (slot === 0) {
+      const cv2 = document.createElement("canvas");
+      cv2.width = W; cv2.height = H;
+      c2 = cv2.getContext("2d");
+      c2.fillStyle = "#ffffff"; c2.fillRect(0, 0, W, H);
+      c2.strokeStyle = "#dddddd"; c2.lineWidth = 1;
+      for (let i = 0; i <= COLS; i++) { c2.beginPath(); c2.moveTo(M2 + i * cw, M2); c2.lineTo(M2 + i * cw, H - M2); c2.stroke(); }
+      for (let i = 0; i <= ROWS; i++) { c2.beginPath(); c2.moveTo(M2, M2 + i * ch); c2.lineTo(W - M2, M2 + i * ch); c2.stroke(); }
+      pages.push(cv2);
+    }
+    const gx = M2 + (slot % COLS) * cw, gy = M2 + Math.floor(slot / COLS) * ch;
+    const qs = ch - 40;
+    fsQrPaint(c2, "FS1|" + s.id + "|" + it.qid, gx + 14, gy + (ch - qs) / 2, qs);
+    const parts = [];
+    if (it.zone) parts.push("Z" + it.zone);
+    if (it.loop) parts.push("L" + it.loop);
+    if (it.dev) parts.push("D" + it.dev);
+    const tx = gx + qs + 24;
+    c2.fillStyle = "#111111"; c2.textAlign = "left"; c2.textBaseline = "top";
+    c2.font = "700 19px Arial";
+    c2.fillText(String(it.info || "QR tag").slice(0, 26), tx, gy + 26, cw - qs - 34);
+    c2.font = "700 24px Arial";
+    c2.fillText(parts.join(" · ") || "—", tx, gy + 54, cw - qs - 34);
+    c2.font = "13px Arial"; c2.fillStyle = "#555555";
+    if (it.barcode) c2.fillText(("BC " + it.barcode).slice(0, 26), tx, gy + 92, cw - qs - 34);
+    c2.fillText(String(s.name || "").slice(0, 24), tx, gy + 116, cw - qs - 34);
+  });
+  deliverFile(fsCanvasesToPdf(pages), "qr-tags-" + String(s.name || "site").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40) + ".pdf", "application/pdf");
+}
+function fsDetQrRender(syms) {
+  const w = document.getElementById("qrWrap");
+  if (!w) return;
+  const s = (typeof fsSite !== "undefined") ? fsSite : null;
+  const ok = FS_WS_APP && syms && syms.length === 1 && s && typeof fsSiteCtx !== "undefined" && fsSiteCtx && syms[0].type !== "campin";
+  if (!ok) { w.style.display = "none"; w.innerHTML = ""; return; }
+  const o = syms[0];
+  const items = s.qrItems || [];
+  const it = o.qid ? items.find(x => x.qid === o.qid) : null;
+  let h = '<label>QR tag</label>';
+  if (it) {
+    h += '<div style="font-size:13px;color:#e8e8e8;margin:2px 0 8px">Linked to register tag <b>' + fsEsc(it.qid) + '</b>' +
+         (it.barcode ? ' &middot; barcode ' + fsEsc(it.barcode) : '') + (it.photo ? ' &middot; QR photo attached' : '') + '</div>';
+    h += '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="dQrEdit" type="button">&#9998; Edit tag</button><button class="btn" id="dQrUnlink" type="button">Unlink</button></div>';
+  } else {
+    h += '<div style="font-size:13px;color:#9aa7ad;margin:2px 0 8px">' + (o.qid ? "Label tag " + fsEsc(o.qid) + " — printed label only, no register tag yet" : "No QR tag linked") + '</div>';
+    h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="btn" id="dQrCreate" type="button">Create QR tag from this device</button>';
+    const unplaced = items.filter(x => !fsQrItemPlaced(s, x.qid));
+    if (unplaced.length) {
+      h += '<select id="dQrLinkSel" style="background:#1a1d21;border:1px solid #444;border-radius:6px;color:#e8e8e8;padding:8px;font-size:13px"><option value="">Link existing tag&hellip;</option>';
+      unplaced.forEach(x => {
+        const parts = [];
+        if (x.zone) parts.push("Z" + x.zone);
+        if (x.loop) parts.push("L" + x.loop);
+        if (x.dev) parts.push("D" + x.dev);
+        h += '<option value="' + fsEsc(x.qid) + '">' + fsEsc((parts.join(" · ") || x.qid) + (x.info ? " — " + x.info : "")) + '</option>';
+      });
+      h += '</select>';
+    }
+    h += '</div>';
+  }
+  w.innerHTML = h;
+  w.style.display = "block";
+  const ed = document.getElementById("dQrEdit");
+  if (ed) ed.onclick = () => fsQrItemOpen(s, it);
+  const un = document.getElementById("dQrUnlink");
+  if (un) un.onclick = () => {
+    if (!confirm("Unlink this device from its QR tag? The tag stays in the register.")) return;
+    pushUndo();
+    delete o.qid;
+    autosaveDirty = true; scheduleAutosave();
+    fsDetQrRender(syms);
+    draw();
+  };
+  const cr = document.getElementById("dQrCreate");
+  if (cr) cr.onclick = () => {
+    pushUndo();
+    if (!o.qid) o.qid = fsQrNewId();
+    const ni = {
+      qid: o.qid, t: Date.now(), barcode: "",
+      zone: document.getElementById("dZone").value.trim() || o.zone || "",
+      loop: document.getElementById("dLoop").value.trim() || o.loop || "",
+      dev: document.getElementById("dDev").value.trim() || o.dev || "",
+      info: document.getElementById("dInfo").value.trim() || o.info || ""
+    };
+    s.qrItems = s.qrItems || [];
+    s.qrItems.push(ni);
+    fsMarkDirty();
+    autosaveDirty = true; scheduleAutosave();
+    fsDetQrRender(syms);
+    draw();
+    fsQrItemOpen(s, ni);
+  };
+  const ls = document.getElementById("dQrLinkSel");
+  if (ls) ls.onchange = () => {
+    if (!ls.value) return;
+    pushUndo();
+    o.qid = ls.value;
+    autosaveDirty = true; scheduleAutosave();
+    fsDetQrRender(syms);
+    draw();
+  };
+}
+let fsLookStream = null, fsLookRaf = null, fsLookLast = null;
+function fsQrResolve(data) {
+  const m = /^FS1\|([^|]+)\|(.+)$/.exec(String(data || ""));
+  if (!m) return { ok: false, msg: "Not a FireSpark tag" };
+  if (typeof fsRegister === "undefined" || !fsRegister || !(fsRegister.clients || []).length) return { ok: false, msg: "Load the register first — tags are looked up in it" };
+  let found = null;
+  (fsRegister.clients || []).forEach(c => (c.sites || []).forEach(st => {
+    if (st.id === m[1]) found = { client: c, parent: null, site: st };
+    (st.buildings || []).forEach(b => { if (b.id === m[1]) found = { client: c, parent: st, site: b }; });
+  }));
+  if (!found) return { ok: false, msg: "That tag's site is not in this register" };
+  const qid = m[2], s = found.site;
+  const item = (s.qrItems || []).find(x => x.qid === qid) || null;
+  let dev = null;
+  const lvl = fsQrItemPlaced(s, qid);
+  const scanSets = [];
+  if (FS_WS_APP && typeof fsSiteCtx !== "undefined" && fsSiteCtx && fsSiteCtx.siteId === s.id && typeof findLevelSets === "function") {
+    try { findLevelSets().forEach(set => scanSets.push(set.objects || [])); } catch (e) {}
+  }
+  if (s.plan && s.plan.levels) s.plan.levels.forEach(lv => scanSets.push(lv.objects || []));
+  scanSets.forEach(arr => arr.forEach(o => { if (!dev && o && o.qid === qid) dev = o; }));
+  if (!item && !dev) return { ok: false, msg: "Tag not found at that site (tag deleted?)" };
+  return { ok: true, client: found.client, parent: found.parent, site: s, item: item, dev: dev, lvl: lvl, qid: qid };
+}
+function fsLookPause() {
+  if (fsLookRaf) cancelAnimationFrame(fsLookRaf);
+  fsLookRaf = null;
+  if (fsLookStream) { fsLookStream.getTracks().forEach(t2 => t2.stop()); fsLookStream = null; }
+}
+function fsQrLookStop() {
+  fsLookPause();
+  document.getElementById("fsLookModal").classList.remove("show");
+  document.getElementById("fsLookCard").style.display = "none";
+}
+function fsLookShow(r) {
+  fsLookLast = r;
+  const card = document.getElementById("fsLookCard");
+  const it = r.item, dv = r.dev;
+  const g = k => (it && it[k]) || (dv && dv[k]) || "";
+  const parts = [];
+  if (g("zone")) parts.push("Zone " + g("zone"));
+  if (g("loop")) parts.push("Loop " + g("loop"));
+  if (g("dev")) parts.push("Device " + g("dev"));
+  let ty = "";
+  try { if (dv && typeof TYPE_MAP !== "undefined" && TYPE_MAP[dv.type]) ty = TYPE_MAP[dv.type].label; } catch (e) {}
+  let h = '<div style="font-size:12px;color:#8fa2ab">' + fsEsc(r.client.name) + '</div>';
+  h += '<div style="font-size:16px;font-weight:800;margin:1px 0 6px">' + fsEsc((r.parent ? r.parent.name + " — " : "") + r.site.name) + '</div>';
+  if (ty) h += '<div style="font-size:13.5px;font-weight:700">' + fsEsc(ty) + '</div>';
+  h += '<div style="font-size:14px;font-weight:700;margin:2px 0">' + (parts.length ? fsEsc(parts.join(" · ")) : "—") + '</div>';
+  if (g("info")) h += '<div style="font-size:13px;color:#c9d2d7;margin:2px 0">' + fsEsc(g("info")) + '</div>';
+  if (it && it.barcode) h += '<div style="font-size:12.5px;color:#8fa2ab;margin:2px 0">Barcode ' + fsEsc(it.barcode) + '</div>';
+  if (it && it.photo) h += '<img id="fsLookPh" src="' + it.photo + '" style="max-width:130px;max-height:100px;border-radius:8px;border:1px solid #444;margin:6px 0;cursor:pointer" title="Tap to view">';
+  if (r.lvl) {
+    if (FS_WS_APP) h += '<div style="margin-top:8px"><button class="btn primary" id="fsLookGo" type="button">&#128205; Show me where it is</button></div>';
+    else h += '<div style="font-size:13px;color:#f2c200;margin-top:8px">&#128205; Placed on the plan (' + fsEsc(r.lvl.name) + ') — open this site in the FireSpark app to see it highlighted.</div>';
+  } else {
+    h += '<div style="font-size:13px;color:#8fa2ab;margin-top:8px">Not placed on a plan yet.</div>';
+  }
+  h += '<div style="margin-top:8px"><button class="btn" id="fsLookAgain" type="button">Scan another</button></div>';
+  card.innerHTML = h;
+  card.style.display = "block";
+  const ph = document.getElementById("fsLookPh");
+  if (ph) ph.onclick = () => fsViewPhoto(it.photo);
+  const go = document.getElementById("fsLookGo");
+  if (go) go.onclick = () => fsQrGoTo(r);
+  const ag = document.getElementById("fsLookAgain");
+  if (ag) ag.onclick = () => { card.style.display = "none"; fsQrLookStart(); };
+}
+function fsQrGoTo(r) {
+  fsQrLookStop();
+  try { document.getElementById("fsResModal").classList.remove("show"); } catch (e) {}
+  fsClient = r.client; fsParentSite = r.parent || null; fsSite = r.site;
+  fsTab = "overview"; fsInfoEdit = false; fsEquipEdit = false;
+  fsRenderSite(); fsShow("fsSiteView");
+  fsEnterWorkspace();
+  const qid = r.qid, t0 = Date.now();
+  (function poll() {
+    let hit = null;
+    try { findLevelSets().forEach(set => (set.objects || []).forEach(o => { if (o && o.qid === qid) hit = { o: o, set: set }; })); } catch (e) {}
+    if (hit && img) {
+      setSelection([hit.o]);
+      if (hit.set.li !== curLevel && levels.length > 1) { afterLevelSwitch = () => zoomFlashDevice(hit.o); switchLevel(hit.set.li); }
+      else zoomFlashDevice(hit.o);
+      return;
+    }
+    if (Date.now() - t0 < 9000) setTimeout(poll, 250);
+    else statusEl.textContent = "Couldn't find that device on the restored plan — open the right plan file and try the scan again.";
+  })();
+}
+function fsQrLookStart() {
+  const st = document.getElementById("fsLookStatus");
+  document.getElementById("fsLookCard").style.display = "none";
+  if (typeof jsQR !== "function") { st.textContent = "Scanner not loaded yet — check your connection and reload once."; return; }
+  st.textContent = "Starting camera…";
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false }).then(stream => {
+    fsLookStream = stream;
+    const vid = document.getElementById("fsLookVideo");
+    vid.srcObject = stream;
+    vid.play().catch(() => {});
+    st.textContent = "Point the camera at a FireSpark QR label.";
+    const cv2 = document.createElement("canvas");
+    const cx2 = cv2.getContext("2d", { willReadFrequently: true });
+    let hold = 0;
+    const loop = () => {
+      if (!fsLookStream) return;
+      if (vid.videoWidth && Date.now() > hold) {
+        cv2.width = vid.videoWidth; cv2.height = vid.videoHeight;
+        cx2.drawImage(vid, 0, 0);
+        const d2 = cx2.getImageData(0, 0, cv2.width, cv2.height);
+        const code = jsQR(d2.data, cv2.width, cv2.height, { inversionAttempts: "dontInvert" });
+        if (code && code.data) {
+          const res = fsQrResolve(code.data);
+          if (res.ok) {
+            if (navigator.vibrate) navigator.vibrate(80);
+            st.textContent = "Found it — details below.";
+            fsLookPause();
+            fsLookShow(res);
+            return;
+          }
+          st.textContent = res.msg;
+          hold = Date.now() + 1200;
+        }
+      }
+      fsLookRaf = requestAnimationFrame(loop);
+    };
+    fsLookRaf = requestAnimationFrame(loop);
+  }).catch(() => { st.textContent = "Camera not available — allow camera access for this app and try again."; });
+}
+function fsQrLookOpen() {
+  document.getElementById("fsLookModal").classList.add("show");
+  fsQrLookStart();
+}
+document.getElementById("fsLookClose").onclick = fsQrLookStop;
+document.getElementById("fsResScan").onclick = () => { document.getElementById("fsResModal").classList.remove("show"); fsQrLookOpen(); };
+
 function fsViewPhoto(src, replaceTarget) {
   fsLbTarget = replaceTarget || null;
   const lb = document.getElementById("fsLightbox");
