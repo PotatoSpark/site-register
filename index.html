@@ -144,6 +144,8 @@
   .fsbtn:active { opacity:.75; }
   .fsbtnP { border:1px solid var(--fs-accent); background:var(--fs-accent); color:#fff; border-radius:10px; padding:11px 18px; font-size:14px; font-weight:700; cursor:pointer; touch-action:manipulation; }
   .fsbtnP:active { background:var(--fs-accentD); }
+  .fsCrumb { display:inline-block; color:var(--fs-accent); font-weight:800; font-size:17px; line-height:1; cursor:pointer; padding:9px 15px 9px 11px; border:1.5px solid var(--fs-accent); border-radius:999px; background:var(--fs-card); -webkit-tap-highlight-color:transparent; }
+  .fsCrumb:active { background:var(--fs-accent); color:#fff; }
   .fstab { padding:13px 4px; margin-right:22px; font-size:14.5px; color:var(--fs-sub); cursor:pointer; border-bottom:3px solid transparent; font-weight:600; white-space:nowrap; }
   .fstab.on { color:var(--fs-accent); border-bottom-color:var(--fs-accent); }
   .fsinput { width:100%; background:var(--fs-card); border:1px solid var(--fs-border); border-radius:8px; color:var(--fs-text); padding:10px; font-size:15px; font-family:inherit; }
@@ -161,7 +163,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.6 (fs 1.4)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.7 (fs 1.5)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -193,7 +195,7 @@
     </div>
 
     <div id="fsSitesView" style="display:none">
-      <div style="margin-bottom:12px"><a id="fsBackClients" style="color:#0f5e6b;font-weight:700;cursor:pointer;font-size:15px">&#8592; All clients</a></div>
+      <div style="margin-bottom:12px"><a id="fsBackClients" class="fsCrumb">&#8592; All clients</a></div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><h2 id="fsClientTitle" style="font-size:20px;flex:1"></h2><button class="fsbtn" id="fsAddSiteBtn">&#65291; Add site</button></div>
       <div id="fsSiteList"></div>
     </div>
@@ -364,6 +366,25 @@
         <label style="display:flex;align-items:center;gap:5px"><input type="checkbox" class="dBgc" value="#ffffff" style="width:17px;height:17px">White</label>
         <label style="display:flex;align-items:center;gap:5px"><input type="checkbox" class="dBgc" value="#111111" style="width:17px;height:17px">Black</label>
       </div>
+    </div>
+    <div id="xtWrap" style="display:none">
+      <label>Type (sets the band colour)</label>
+      <select id="dXtype" style="width:100%;background:#1a1d21;border:1px solid #444;border-radius:6px;color:#e8e8e8;padding:8px;font-size:14px">
+        <option value="">&mdash; not set (plain red)</option>
+        <option value="water">Water &mdash; plain red, no band</option>
+        <option value="vl">Vaporising Liquid &mdash; yellow band</option>
+        <option value="foam">Foam &mdash; blue band</option>
+        <option value="dcp">Dry Chemical Powder &mdash; white band</option>
+        <option value="wet">Wet Chemical &mdash; oatmeal band</option>
+        <option value="co2">CO2 &mdash; black band</option>
+      </select>
+    </div>
+    <div id="msWrap" style="display:none">
+      <label>Coverage</label>
+      <select id="dMsCov" style="width:100%;background:#1a1d21;border:1px solid #444;border-radius:6px;color:#e8e8e8;padding:8px;font-size:14px">
+        <option value="360">360&deg; &mdash; all-round</option>
+        <option value="180">180&deg; &mdash; half</option>
+      </select>
     </div>
     <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:14px;color:#e8e8e8">
       <input type="checkbox" id="dFailed" style="width:18px;height:18px"> Failed
@@ -783,6 +804,11 @@ const TYPES = [
   { id:"exfan",    tab:"elec", label:"Exhaust fan",  glyph:"exfan",   text:"", color:"#111111" },
   { id:"ceilfan",  tab:"elec", label:"Ceiling fan",  glyph:"ceilfan", text:"", color:"#111111" },
   { id:"walllt",   tab:"elec", label:"Wall light",   glyph:"walllt",  text:"", color:"#111111" },
+  { id:"gpo1",     tab:"elec", label:"Single GPO",   glyph:"gpo",     text:"", color:"#111111" },
+  { id:"gpo2",     tab:"elec", label:"Double GPO",   glyph:"gpo",     text:"", color:"#111111", dbl:true },
+  { id:"data1",    tab:"elec", label:"Data point",   glyph:"datap",   text:"", color:"#111111" },
+  { id:"data2",    tab:"elec", label:"Double data",  glyph:"datap",   text:"", color:"#111111", dbl:true },
+  { id:"msensor",  tab:"elec", label:"Motion sensor",glyph:"msensor", text:"", color:"#111111" },
   { id:"door",     tab:"bldg", label:"Door",         glyph:"door",     text:"",      color:"#111111" },
   { id:"dbldoor",  tab:"bldg", label:"Double Door",  glyph:"dbldoor",  text:"",      color:"#111111" },
   { id:"sldoor",   tab:"bldg", label:"Sliding Door", glyph:"sldoor",   text:"",      color:"#111111" },
@@ -794,6 +820,7 @@ const TYPES = [
   { id:"campin",   tab:"tools", label:"Photo pin",   glyph:"campin",   text:"",      color:"#0277bd" }
 ];
 const TYPE_MAP = {}; TYPES.forEach(t => TYPE_MAP[t.id] = t);
+const XT_BANDS = { vl:"#f2c200", foam:"#1565c0", water:"", dcp:"#ffffff", wet:"#d9a675", co2:"#111111" };   // extinguisher band colour per type
 const OLD_TYPE_MAP = { heat:"thermal", cheat:"cthermal" };
 
 const TOOLS_TAB = [
@@ -963,6 +990,11 @@ function symDims(o) {   // image-space width/height (before rotation)
   else if (t.glyph === "downlt") { w = s * 0.75; h = s * 0.75; }
   else if (t.glyph === "ceilfan") { w = s * 1.3; h = s * 1.3; }
   else if (t.glyph === "walllt") { w = s * 1.5; h = s * 0.8; }
+  else if (t.glyph === "gpo") { w = s * (t.dbl ? 1.2 : 0.95); h = s * 1.05; }
+  else if (t.glyph === "datap") { w = s * (t.dbl ? 1.25 : 0.95); h = s * 1.1; }
+  else if (t.glyph === "msensor") { w = s * 1.5; h = s * 1.5; }
+  else if (t.glyph === "hreel") { w = s * 1.05; h = s * 1.15; }
+  else if (t.glyph === "exting") { w = s * 0.98; h = s * 1.25; }
   const rr = ((o.rot || 0) % 360) * Math.PI / 180;
   if (rr) {
     const ca = Math.abs(Math.cos(rr)), sa = Math.abs(Math.sin(rr));
@@ -1272,27 +1304,57 @@ function drawSym(c, o, scale) {
     c.fill();
     c.beginPath(); c.rect(-w / 2, -h / 2, w, h); c.stroke();
   } else if (t.glyph === "hreel") {
-    const r = s / 2;
-    c.fillStyle = col; c.strokeStyle = "#ffffff";
-    c.lineWidth = Math.max(1, s * 0.06);
-    c.beginPath(); c.rect(-r, -r, s, s); c.fill(); c.stroke();
-    c.strokeStyle = "#ffffff"; c.lineWidth = Math.max(1.5, r * 0.14);
-    c.beginPath(); c.arc(-r * 0.15, 0, r * 0.5, 0, Math.PI * 2); c.stroke();
-    c.beginPath(); c.arc(-r * 0.15, 0, r * 0.18, 0, Math.PI * 2); c.stroke();
-    c.beginPath(); c.moveTo(r * 0.35, 0); c.lineTo(r * 0.72, 0); c.stroke();
-  } else if (t.glyph === "exting") {
-    const r = s / 2;
-    c.fillStyle = col; c.strokeStyle = "#ffffff";
-    c.lineWidth = Math.max(1, s * 0.06);
-    c.beginPath(); c.rect(-r, -r, s, s); c.fill(); c.stroke();
-    c.fillStyle = "#ffffff";
+    // C17: spiral hose reel with top-right nozzle (clean vector from the reference; default red)
+    const r = s * 0.48;
+    c.strokeStyle = col; c.lineWidth = Math.max(1.4, s * 0.085); c.lineCap = "round"; c.lineJoin = "round";
     c.beginPath();
-    if (c.roundRect) c.roundRect(-r * 0.28, -r * 0.25, r * 0.56, r * 0.95, r * 0.15); else c.rect(-r * 0.28, -r * 0.25, r * 0.56, r * 0.95);
+    for (let k = 0; k <= 96; k++) {
+      const tt = k / 96;
+      const a = -Math.PI / 2 + tt * Math.PI * 2 * 2.6;
+      const rr = r * (1 - 0.82 * tt);
+      const px = Math.cos(a) * rr, py = Math.sin(a) * rr + s * 0.06;
+      if (k === 0) c.moveTo(px, py); else c.lineTo(px, py);
+    }
+    c.stroke();
+    const ny = -r + s * 0.06;
+    c.beginPath(); c.moveTo(0, ny - s * 0.10); c.lineTo(0, ny + s * 0.08); c.stroke();
+    c.beginPath();
+    c.moveTo(s * 0.04, ny - s * 0.08); c.lineTo(s * 0.42, ny - s * 0.015);
+    c.moveTo(s * 0.04, ny + s * 0.05); c.lineTo(s * 0.42, ny - s * 0.015);
+    c.stroke();
+    c.beginPath(); c.moveTo(s * 0.42, ny - s * 0.08); c.lineTo(s * 0.42, ny + s * 0.05); c.stroke();
+  } else if (t.glyph === "exting") {
+    // C17: extinguisher - body in symbol colour, black top hardware + horn,
+    // band colour set by the Details "Type" selector (o.xt, see XT_BANDS)
+    const bw = s * 0.52, bt = -s * 0.26, bh = s * 0.92;
+    const outl = Math.max(0.8, s * 0.035);
+    c.fillStyle = "#111111"; c.strokeStyle = "#ffffff"; c.lineWidth = outl; c.lineJoin = "round";
+    c.beginPath();
+    c.moveTo(s * 0.18, bt - s * 0.16);
+    c.lineTo(s * 0.47, bt + s * 0.10);
+    c.lineTo(s * 0.47, bt + s * 0.52);
+    c.lineTo(s * 0.30, bt + s * 0.44);
+    c.closePath(); c.fill(); c.stroke();
+    c.beginPath();
+    c.moveTo(-s * 0.34, bt - s * 0.06);
+    c.lineTo(-s * 0.38, bt - s * 0.20);
+    c.lineTo(s * 0.22, bt - s * 0.20);
+    c.lineTo(s * 0.22, bt - s * 0.10);
+    c.lineTo(-s * 0.26, bt - s * 0.10);
+    c.lineTo(-s * 0.28, bt - s * 0.02);
+    c.closePath(); c.fill(); c.stroke();
+    c.fillStyle = col;
+    c.fillRect(-s * 0.05, bt - s * 0.16, s * 0.10, s * 0.17);
+    c.beginPath();
+    if (c.roundRect) c.roundRect(-bw / 2, bt, bw, bh, [s * 0.15, s * 0.15, s * 0.06, s * 0.06]);
+    else c.rect(-bw / 2, bt, bw, bh);
     c.fill();
-    c.fillRect(-r * 0.09, -r * 0.5, r * 0.18, r * 0.28);
-    c.strokeStyle = "#ffffff"; c.lineWidth = r * 0.12; c.lineCap = "round";
-    c.beginPath(); c.moveTo(-r * 0.3, -r * 0.52); c.lineTo(r * 0.3, -r * 0.52); c.stroke();
-    c.beginPath(); c.moveTo(r * 0.05, -r * 0.45); c.lineTo(r * 0.42, -r * 0.2); c.stroke();
+    const band = XT_BANDS[o.xt] || "";
+    if (band) {
+      c.fillStyle = band;
+      c.fillRect(-bw / 2, s * 0.04, bw, s * 0.15);
+      if (band === "#ffffff") { c.strokeStyle = "#b9b9b9"; c.lineWidth = Math.max(0.7, s * 0.02); c.strokeRect(-bw / 2, s * 0.04, bw, s * 0.15); }
+    }
   } else if (t.glyph === "batten") {
     const w = s * 2.2, cap = s * 0.5;
     c.strokeStyle = col; c.lineWidth = Math.max(1.2, s * 0.09); c.lineCap = "round";
@@ -1331,6 +1393,41 @@ function drawSym(c, o, scale) {
     c.beginPath(); c.moveTo(-s * 0.72, -s * 0.28); c.lineTo(-s * 0.72, s * 0.28); c.stroke();
     c.beginPath(); c.moveTo(-s * 0.72, 0); c.lineTo(-s * 0.30, 0); c.stroke();
     c.beginPath(); c.arc(0, 0, s * 0.30, 0, Math.PI * 2); c.fill(); c.stroke();
+  } else if (t.glyph === "gpo") {
+    // C17: power point - arc + stem; double keeps the diagonal stroke, no numeral
+    const r = s * 0.44, y0 = s * 0.34;
+    c.strokeStyle = col; c.lineWidth = Math.max(1.4, s * 0.1); c.lineCap = "round";
+    c.beginPath(); c.arc(0, y0, r, Math.PI, Math.PI * 2); c.stroke();
+    c.beginPath(); c.moveTo(0, y0 - r); c.lineTo(0, -s * 0.62); c.stroke();
+    if (t.dbl) { c.beginPath(); c.moveTo(s * 0.12, y0 - s * 0.04); c.lineTo(s * 0.56, y0 - r - s * 0.06); c.stroke(); }
+  } else if (t.glyph === "datap") {
+    // C17: data point - squared bracket + stem; double = same diagonal-stroke convention
+    const hw2 = s * 0.44, by = -s * 0.06, leg = s * 0.5;
+    c.strokeStyle = col; c.lineWidth = Math.max(1.4, s * 0.1); c.lineCap = "round"; c.lineJoin = "round";
+    c.beginPath();
+    c.moveTo(-hw2, by + leg); c.lineTo(-hw2, by); c.lineTo(hw2, by); c.lineTo(hw2, by + leg);
+    c.stroke();
+    c.beginPath(); c.moveTo(0, by); c.lineTo(0, -s * 0.62); c.stroke();
+    if (t.dbl) { c.beginPath(); c.moveTo(s * 0.14, by + s * 0.26); c.lineTo(s * 0.58, by - s * 0.18); c.stroke(); }
+  } else if (t.glyph === "msensor") {
+    // C17: motion sensor - circle-MS; 360 = all 6 radiating lines, 180 = top half only (o.cov)
+    const r = s * 0.42;
+    c.strokeStyle = col; c.lineWidth = Math.max(1.3, s * 0.08); c.lineCap = "round";
+    const angs = o.cov === "180" ? [0, 180, 225, 315] : [0, 45, 135, 180, 225, 315];
+    c.beginPath();
+    angs.forEach(a => {
+      const rad = a * Math.PI / 180;
+      c.moveTo(Math.cos(rad) * r * 1.18, Math.sin(rad) * r * 1.18);
+      c.lineTo(Math.cos(rad) * r * 1.72, Math.sin(rad) * r * 1.72);
+    });
+    c.stroke();
+    c.fillStyle = "#ffffff";
+    c.beginPath(); c.arc(0, 0, r, 0, Math.PI * 2); c.fill(); c.stroke();
+    c.save(); c.scale(sx, sy);
+    c.fillStyle = col; c.font = "bold " + (s * 0.34) + "px system-ui, sans-serif";
+    c.textAlign = "center"; c.textBaseline = "middle";
+    c.fillText("MS", 0, s * 0.02);
+    c.restore();
   } else if (t.glyph === "campin") {
     // map pin with a camera; the lens fills solid once a photo is attached
     const r = s * 0.5;
@@ -5127,6 +5224,18 @@ function openDetails() {
       cb.onchange = () => { if (cb.checked) document.querySelectorAll(".dBgc").forEach(x => { if (x !== cb) x.checked = false; }); };
     });
   }
+  const xtTargets = syms.filter(o => o.type === "exting");
+  document.getElementById("xtWrap").style.display = xtTargets.length ? "block" : "none";
+  if (xtTargets.length) {
+    const xv = xtTargets[0].xt || "";
+    document.getElementById("dXtype").value = xtTargets.every(o => (o.xt || "") === xv) ? xv : "";
+  }
+  const msTargets = syms.filter(o => o.type === "msensor");
+  document.getElementById("msWrap").style.display = msTargets.length ? "block" : "none";
+  if (msTargets.length) {
+    const mv = msTargets[0].cov || "360";
+    document.getElementById("dMsCov").value = msTargets.every(o => (o.cov || "360") === mv) ? mv : "360";
+  }
   const fEl = document.getElementById("dFailed");
   fEl.checked = syms.every(o => o.failed);
   fEl.indeterminate = multi && syms.some(o => o.failed) && !syms.every(o => o.failed);
@@ -5216,6 +5325,13 @@ document.getElementById("detailsSave").onclick = () => {
       if (o.type === "bglass") {
         const bgSel = [...document.querySelectorAll(".dBgc")].find(cb => cb.checked);
         if (bgSel) o.color = bgSel.value;
+      }
+      if (o.type === "exting") {
+        const xv = document.getElementById("dXtype").value;
+        if (xv) o.xt = xv; else delete o.xt;
+      }
+      if (o.type === "msensor") {
+        o.cov = document.getElementById("dMsCov").value === "180" ? "180" : "360";
       }
       if (!multi || failedTouched) o.failed = failed;
       document.querySelectorAll(".dYear").forEach(cb => {
@@ -6041,7 +6157,7 @@ function fsDashRender() {
   const over = rows.filter(r => r.days !== null && r.days < 0).length;
   const soon = rows.filter(r => r.days !== null && r.days >= 0 && r.days <= 30).length;
   const defs = rows.reduce((a, r) => a + r.def, 0);
-  let html = '<div style="margin-bottom:12px"><a id="fsDashBack" style="color:var(--fs-accent);font-weight:700;cursor:pointer;font-size:15px">&#8592; Clients</a></div>';
+  let html = '<div style="margin-bottom:12px"><a id="fsDashBack" class="fsCrumb">&#8592; Clients</a></div>';
   html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px"><h2 style="font-size:20px;flex:1;min-width:150px">&#128202; Portfolio dashboard</h2>' +
     '<button class="fsbtn" id="fsDashPdf">&#128196; PDF</button></div>';
   const chip = (n, lbl, col) => '<div class="fscard" style="flex:1;min-width:110px;padding:12px;text-align:center"><div style="font-size:24px;font-weight:800;color:' + col + '">' + n + '</div><div style="font-size:11.5px;color:var(--fs-sub2)">' + lbl + '</div></div>';
@@ -6261,7 +6377,7 @@ function fsRenderSite() {
   const wrap = document.getElementById("fsSiteView");
   const addr = s.address || "";
 
-  let html = '<div style="margin-bottom:14px"><a id="fsBackSites" style="color:var(--fs-accent);font-weight:700;cursor:pointer;font-size:15px">&#8592; ' + fsEsc(fsParentSite ? fsParentSite.name : fsClient.name) + '</a></div>';
+  let html = '<div style="margin-bottom:14px"><a id="fsBackSites" class="fsCrumb">&#8592; ' + fsEsc(fsParentSite ? fsParentSite.name : fsClient.name) + '</a></div>';
   html += '<div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin-bottom:16px">';
   html += '<div style="flex:1;min-width:250px"><div style="font-size:11px;letter-spacing:2px;color:var(--fs-accent);font-weight:800">' + (fsParentSite ? 'BUILDING &middot; ' + fsEsc(fsParentSite.name).toUpperCase() : 'SITE') + '</div>';
   html += '<h1 style="font-size:32px;font-weight:700;margin:2px 0 4px">' + fsEsc(s.name) + '</h1>';
@@ -8952,7 +9068,7 @@ function fsPlRender() {
     (fsRegister.travel ? "travel times (" + fsRegister.travel.ids.length + " sites) updated " + (fsRegister.travel.updated || "").slice(0, 10) : "no travel times yet - Plan month fetches them (needs internet once)");
   if (unlocated.length) tvNote += '<br><span style="color:#c62828">Not located (fix the address, then ⟳ Update travel times in ⚙): ' + unlocated.map(fsEsc).join(", ") + '</span>';
 
-  let html = '<div style="margin-bottom:12px"><a id="fsPlBack" style="color:var(--fs-accent);font-weight:700;cursor:pointer;font-size:15px">&#8592; Clients</a></div>';
+  let html = '<div style="margin-bottom:12px"><a id="fsPlBack" class="fsCrumb">&#8592; Clients</a></div>';
   html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">' +
     '<h2 style="font-size:20px;flex:1;min-width:150px">&#128197; ' + fsPlMonthName() + '</h2>' +
     '<button class="fsbtn" id="fsPlPrev">&#8249;</button><button class="fsbtn" id="fsPlNext">&#8250;</button>' +
