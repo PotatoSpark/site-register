@@ -166,7 +166,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.11 (fs 1.9)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.12 (fs 1.10)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -207,6 +207,7 @@
     <div id="fsPlannerView" style="display:none"></div>
     <div id="fsDashView" style="display:none"></div>
     <input type="file" id="fsPhotoInput" accept="image/*" multiple style="display:none">
+    <input type="file" id="fsFileAnyInput" multiple style="display:none">
     <div id="fsLightbox" style="display:none;position:fixed;inset:0;z-index:210;background:rgba(10,14,16,.93);overflow:auto;text-align:center;cursor:zoom-out">
       <div style="position:sticky;top:0;display:flex;justify-content:flex-end;gap:8px;padding:10px;z-index:1">
         <button class="fsbtn" id="fsLbReplace" style="display:none">&#8635; Replace photo</button>
@@ -236,7 +237,7 @@
     <button class="btn" id="btnPageMinus" title="Remove added white space">Page &minus;</button>
     <button class="btn" id="btnLabels" style="display:none" title="Show or hide symbol labels">&#127991; Labels</button>
     <button class="btn" id="btnWsSet" title="Workspace settings">&#9881;</button>
-    <button class="btn" id="btnZones" title="Zones — manage and colour zones">Zones</button>
+    <button class="btn" id="btnZones" style="display:none" title="Zone counts (moved to the Tools tab)">Zones</button><!-- migrated to Tools tab "Zone counts" tile, 23 Jul pass; id+handler kept -->
     <button class="btn" id="btnNotes" title="Site notes">&#128221; Notes</button>
     <select id="levelSel" style="display:none;background:#2e333a;color:#e8e8e8;border:1px solid #444;border-radius:8px;padding:7px"></select>
     <button class="btn levels" id="btnLevels" title="Building levels — add or switch floors">&#127970; Levels</button>
@@ -389,6 +390,10 @@
         <option value="360">360&deg; &mdash; all-round</option>
         <option value="180">180&deg; &mdash; half</option>
       </select>
+    </div>
+    <div id="ctWrap" style="display:none">
+      <label>Change type &mdash; keeps ID, zone/loop/device no., test history, QR link and photo</label>
+      <select id="dChgType" style="width:100%;background:#1a1d21;border:1px solid #444;border-radius:6px;color:#e8e8e8;padding:8px;font-size:14px"></select>
     </div>
     <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:14px;color:#e8e8e8">
       <input type="checkbox" id="dFailed" style="width:18px;height:18px"> Failed
@@ -719,6 +724,17 @@
     <div class="row" style="margin-top:12px"><button class="btn" id="battClose">Close</button></div>
   </div>
 </div>
+<div class="modal" id="fsHistModal" style="z-index:121">
+  <div class="modalbox" style="max-width:430px;width:94vw;text-align:left">
+    <h3 id="fsHmTitle" style="margin-bottom:4px">Add a test record</h3>
+    <div id="fsHmNote" style="font-size:12.5px;color:#999;margin-bottom:8px">For tests done on paper or missed in the app &mdash; sets the cycle dates. No checklist answers are attached.</div>
+    <label>Test type</label><select id="fsHmMode" style="width:100%;background:#1a1d21;border:1px solid #444;border-radius:6px;color:#e8e8e8;padding:8px;font-size:14px"></select>
+    <label>Date done</label><input type="date" id="fsHmDate" style="max-width:180px">
+    <label>Technician</label><input type="text" id="fsHmTech" autocomplete="off">
+    <label>Observations / comments</label><textarea id="fsHmObs" rows="2"></textarea>
+    <div class="row" style="margin-top:14px"><button class="btn" id="fsHmCancel">Cancel</button><button class="btn primary" id="fsHmSave">Save</button></div>
+  </div>
+</div>
 <div class="modal" id="fsAfssModal" style="z-index:121">
   <div class="modalbox" style="max-width:430px;width:94vw;text-align:left">
     <h3 style="margin-bottom:4px">AFSS evidence pack</h3>
@@ -907,6 +923,7 @@ const TOOLS_TAB = [
   { id:"find",    label:"Find device", icon:"🔎" },
   { id:"measure", label:"Measure",     icon:"📏" },
   { id:"zones",   label:"Zones (ZN)",  icon:"⬠" },
+  { id:"zonecounts", label:"Zone counts", icon:"🔢" },
   { id:"battcalc", label:"Battery calc", icon:"🔋" }
 ];
 const MARKUP_TOOLS = [
@@ -3025,6 +3042,7 @@ function buildPalette() {
       if (t.id === "photos") { openPhotosGallery(); return; }
       if (t.id === "find") { openFind(); return; }
       if (t.id === "battcalc") { openBattCalc(); return; }
+      if (t.id === "zonecounts") { document.getElementById("btnZones").onclick(); return; }
       if (t.id !== "hatch" && MODIFY_TOOLS.some(m => m.id === t.id)) { modifyAction(t.id); return; }
       setTool(t.id);
     };
@@ -5420,6 +5438,13 @@ function openDetails() {
     const mv = msTargets[0].cov || "360";
     document.getElementById("dMsCov").value = msTargets.every(o => (o.cov || "360") === mv) ? mv : "360";
   }
+  const ctOk = !multi && syms[0].type !== "campin";
+  document.getElementById("ctWrap").style.display = ctOk ? "block" : "none";
+  if (ctOk) {
+    const tabNames = { fire:"Fire", exit:"Exit", elec:"Electrical", bldg:"Building", tools:"Tools" };
+    document.getElementById("dChgType").innerHTML = TYPES.filter(x => x.id !== "campin").map(x =>
+      '<option value="' + x.id + '"' + (x.id === syms[0].type ? ' selected' : '') + '>' + (tabNames[x.tab] || x.tab) + ' \u2014 ' + x.label + '</option>').join("");
+  }
   const fEl = document.getElementById("dFailed");
   fEl.checked = syms.every(o => o.failed);
   fEl.indeterminate = multi && syms.some(o => o.failed) && !syms.every(o => o.failed);
@@ -5493,6 +5518,20 @@ document.getElementById("detailsSave").onclick = () => {
   stopDbaMeasure();
   if (detailsTargets.length) {
     pushUndo();
+    // Change type (single device, 23 Jul pass): keeps identity - qid, Z/L/D, year ticks, QR link, photo
+    if (detailsTargets.length === 1 && detailsTargets[0].kind === "sym" && detailsTargets[0].type !== "campin") {
+      const o0 = detailsTargets[0];
+      const nt = document.getElementById("dChgType").value;
+      if (nt && nt !== o0.type && TYPE_MAP[nt]) {
+        if (confirm("Change type: " + ((TYPE_MAP[o0.type] || {}).label || o0.type) + " \u2192 " + TYPE_MAP[nt].label + "?\n\nKeeps zone/loop/device number, year ticks, QR link and photo.")) {
+          const wasDefCol = !o0.color || o0.color === ((TYPE_MAP[o0.type] || {}).color);
+          o0.type = nt;
+          if (wasDefCol && TYPE_MAP[nt].color) o0.color = TYPE_MAP[nt].color;
+          if (nt !== "exting") delete o0.xt; else document.getElementById("dXtype").value = (o0.xt || "");
+          if (nt !== "msensor") delete o0.cov; else document.getElementById("dMsCov").value = (o0.cov || "360");
+        }
+      }
+    }
     const multi = detailsTargets.length > 1;
     const vals = {
       zone: document.getElementById("dZone").value.trim(),
@@ -6201,10 +6240,11 @@ const FS_CYCLES = [
   { key:"lastMonthly", label:"Monthly",   months:1 },
   { key:"last6m",      label:"6 monthly", months:6 },
   { key:"lastAnnual",  label:"Annual",    months:12 },
-  { key:"last5y",      label:"5 yearly",  months:60 }
+  { key:"last5y",      label:"5 yearly",  months:60 },
+  { key:"lastFF",      label:"Full Function", months:12 }
 ];
 const FS_EQUIP_FIELDS = [
-  "Panel location", "Panel type", "Panel battery type / size", "Panel instructions", "Detectors", "EWIS location", "EWIS type",
+  "Panel location", "Panel type", "Panel instructions", "Panel battery type / size", "Detectors", "EWIS location", "EWIS type",
   "OWS / speaker notes", "Fire extinguisher locations", "Fire extinguisher", "Fire doors", "Hose reel locations",
   "Hydrant / booster location", "Pump room location", "Sprinkler valve room",
   "Exit lights", "Emergency lights", "Gas suppression", "Other equipment"
@@ -6498,7 +6538,7 @@ function fsInfoPhotoHtml() {
     html += '<div class="fslabel">' + (fsParentSite ? 'Building name' : 'Site name') + '</div><input class="fsinput" id="fsSiteNameIn" autocomplete="off" value="' + fsEsc(s.name || "") + '">';
     html += '<div class="fslabel">Address (shown under the site name)</div><input class="fsinput" id="fsSiteAddrIn" autocomplete="off" value="' + fsEsc(s.address || "") + '">';
   }
-  const infoRows = [["Access requirements", "access"], ["Contacts", "contacts"], ["Further information", "furtherInfo"], ["Isolation points (one per line \u2014 ticked off during tests)", "isolations"]];
+  const infoRows = [["Access requirements", "access"], ["Contacts", "contacts"], ["Further information", "furtherInfo"]];   // isolation points row hidden 23 Jul pass (unused; data kept in s.isolations)
   infoRows.forEach(([label, key]) => {
     if (fsInfoEdit) {
       html += '<div class="fslabel">' + label + '</div><textarea class="fsinput fsInfoField" data-key="' + key + '" rows="2">' + fsEsc(s[key] || "") + '</textarea>';
@@ -6508,6 +6548,8 @@ function fsInfoPhotoHtml() {
   });
   if (fsInfoEdit) html += '<div class="fslabel">Google Maps link (Maps &rarr; Share &rarr; Copy link) &mdash; adds an "Open in maps" button next to Open Site Workspace</div>' +
     '<input class="fsinput fsInfoField" data-key="mapUrl" type="url" placeholder="https://maps.app.goo.gl/..." value="' + fsEsc(s.mapUrl || "") + '">';
+  if (fsInfoEdit) html += '<div class="fslabel">Coordinates (lat, lng) &mdash; adds a &#128205; Coordinates button that opens maps at the EXACT spot (remote sites / gates where the address only gets you so far)</div>' +
+    '<input class="fsinput fsInfoField" data-key="coords" autocomplete="off" placeholder="-32.7345, 151.5433" value="' + fsEsc(s.coords || "") + '">';
   const vis = s.visit || {};
   if (fsInfoEdit) {
     const vRow = (label, key) => {
@@ -6573,13 +6615,14 @@ function fsRenderSite() {
   if (addr) html += '<div style="color:var(--fs-sub);font-size:15px">' + fsEsc(addr) + '</div>';
   html += '</div><div style="display:flex;gap:10px;align-items:center;padding-top:22px">';
   if (s.mapUrl || (s.address || "").trim() || s.geo) html += '<button class="fsbtn" id="fsMapBtn">Open in maps</button>';
+  if (fsCoordsParse(s)) html += '<button class="fsbtn" id="fsCoordBtn" title="Open maps at the exact saved coordinates \u2014 for remote sites where the address stops short of the entry point">&#128205; Coordinates</button>';
   html += '<span style="font-size:12.5px;color:var(--fs-sub2);align-self:center">Plans &amp; testing live in the FireSpark app</span></div></div>';
 
   // status strip - compact (testing info shouldn't steal the show; Overview is the main event)
   html += '<div class="fscard" style="display:flex;flex-wrap:wrap;align-items:stretch;margin-bottom:14px">';
-  FS_CYCLES.filter(c => typeof fsCycOn !== "function" || fsCycOn(c.key)).filter(c => c.key !== "last5y" || (s.testing || {})[c.key]).forEach((c, i) => {
+  FS_CYCLES.filter(c => typeof fsCycOn !== "function" || fsCycOn(c.key)).filter(c => (c.key !== "last5y" && c.key !== "lastFF") || (s.testing || {})[c.key]).forEach((c, i) => {
     const st = fsCycleStatus(s, c);
-    html += '<div class="fsCyc" style="flex:1;min-width:118px;padding:7px 12px;' + (i ? 'border-left:1px solid var(--fs-border)' : '') + '">' +
+    html += '<div class="fsCyc" style="flex:1;min-width:104px;padding:7px 12px;' + (i ? 'border-left:1px solid var(--fs-border)' : '') + '">' +
       '<div style="font-size:10.5px;color:var(--fs-sub2);letter-spacing:.4px;text-transform:uppercase">' + c.label + '</div>' +
       '<div style="font-size:12.5px;font-weight:700;color:' + st.col + ';margin:1px 0 2px;white-space:nowrap">' + st.txt + '</div>' +
       '<input type="date" class="fsCycDate" data-key="' + c.key + '" value="' + fsEsc((s.testing || {})[c.key] || "") + '" title="Last done" style="border:1px solid var(--fs-border);border-radius:5px;padding:1px 2px;font-size:10px;color:var(--fs-sub2);background:transparent;max-width:110px">' +
@@ -6613,6 +6656,8 @@ function fsRenderSite() {
   };
   const fsMapB = document.getElementById("fsMapBtn");
   if (fsMapB) fsMapB.onclick = () => window.open(s.mapUrl && fsMapsApp() !== "waze" ? s.mapUrl : fsMapsNavUrl(s), "_blank");
+  const fsCoordB = document.getElementById("fsCoordBtn");
+  if (fsCoordB) fsCoordB.onclick = () => window.open(fsCoordsUrl(s), "_blank");
   const fsOwsBtn = document.getElementById("fsOpenWs");
   if (fsOwsBtn) fsOwsBtn.onclick = fsEnterWorkspace;
   document.querySelectorAll(".fsCycDate").forEach(inp => {
@@ -6720,13 +6765,13 @@ function fsRenderTab() {
   if (fsTab === "history") {
     const hist = s.history || [];
     html += '<div class="fscard" style="padding:20px">';
-    html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><h3 style="font-size:16px;font-weight:700;flex:1">Test history</h3>' + (hist.length ? '<button class="fsbtn" id="fsAfssBtn">&#128196; AFSS pack</button><button class="fsbtn" id="fsYearPdfBtn">&#128197; Year summary PDF</button>' : '') + '</div>';
-    if (!hist.length) html += '<div style="color:var(--fs-faint);font-size:13.5px">No tests recorded yet. Open the Site Workspace and tap <b>&#9654; Start test</b>.</div>';
+    html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap"><h3 style="font-size:16px;font-weight:700;flex:1">Test history</h3><button class="fsbtn" id="fsAddTestBtn">+ Add test</button>' + (hist.length ? '<button class="fsbtn" id="fsAfssBtn">&#128196; AFSS pack</button><button class="fsbtn" id="fsYearPdfBtn">&#128197; Year summary PDF</button>' : '') + '</div>';
+    if (!hist.length) html += '<div style="color:var(--fs-faint);font-size:13.5px">No tests recorded yet. Open the Site Workspace and tap <b>&#9654; Start test</b> &mdash; or use <b>+ Add test</b> to record one done on paper.</div>';
     hist.forEach(r => {
       const failBits = (r.checklist && r.checklist.f ? r.checklist.f : 0) + ((r.failedDevices || []).length);
       html += '<details style="border-top:1px solid var(--fs-border);padding:9px 0">';
       html += '<summary style="cursor:pointer;font-weight:700;font-size:14.5px">' + fsEsc(r.label || r.mode) + ' &mdash; ' + fsEsc((r.finished || "").slice(0, 10)) + (r.tech ? ' &middot; ' + fsEsc(r.tech) : '') +
-        (failBits ? ' &middot; <span style="color:#c62828">' + failBits + ' fail' + (failBits > 1 ? 's' : '') + '</span>' : ' &middot; <span style="color:#1b8a3f">no fails</span>') + '</summary>';
+        (r.manual ? ' &middot; <span style="color:var(--fs-sub2)">added manually</span>' : (failBits ? ' &middot; <span style="color:#c62828">' + failBits + ' fail' + (failBits > 1 ? 's' : '') + '</span>' : ' &middot; <span style="color:#1b8a3f">no fails</span>')) + '</summary>';
       html += '<div style="font-size:13px;padding:6px 2px;color:var(--fs-sub)">';
       if (r.checklist) html += 'Checklist: <b style="color:#1b8a3f">' + r.checklist.p + ' P</b> &middot; <b style="color:#c62828">' + r.checklist.f + ' F</b> &middot; ' + r.checklist.na + ' N/A' + (r.checklist.total ? ' (of ' + r.checklist.total + ')' : '') + '<br>';
       if (r.devices && r.devices.total) html += 'Devices tested: <b>' + r.devices.tested + ' / ' + r.devices.total + '</b> (' + fsEsc(String(r.year || "")) + ')<br>';
@@ -6736,7 +6781,8 @@ function fsRenderTab() {
       if ((r.ews5 || []).length) { html += 'EWS records: ' + r.ews5.length + ' amp zone' + (r.ews5.length > 1 ? 's' : '') + ' (CIS / SPL / Z — see PDF)<br>'; }
       if (r.obs) html += 'Obs: ' + fsEsc(r.obs) + '<br>';
       html += '<span style="color:var(--fs-faint)">' + fsEsc(r.ref || '') + ' &middot; started ' + fsEsc((r.started || '').slice(0, 16).replace('T', ' ')) + '</span>';
-      html += '<div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap"><button class="fsbtn fsHistPdf" data-id="' + fsEsc(r.id || '') + '" style="font-weight:700">&#128196; Save PDF</button>' +
+      if ((r.edits || []).length) html += '<br><span style="color:#b58900">&#9998; edited ' + r.edits.map(e => fsEsc((e.at || '').slice(0, 10)) + ': ' + fsEsc(e.what || '')).join(' &middot; ') + '</span>';
+      html += '<div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap">' + (r.manual ? '' : '<button class="fsbtn fsHistPdf" data-id="' + fsEsc(r.id || '') + '" style="font-weight:700">&#128196; Save PDF</button>') +
         '<button class="fsbtn fsHistEdit" data-id="' + fsEsc(r.id || '') + '">&#9998; Edit</button>' +
         '<button class="fsbtn fsHistDel" data-id="' + fsEsc(r.id || '') + '" style="color:#c62828">&#128465; Delete</button></div>';
       html += '</div></details>';
@@ -6758,7 +6804,7 @@ function fsRenderTab() {
     if (closed.length) {
       html += '<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--fs-sub);font-size:13.5px">' + closed.length + ' rectified</summary>';
       closed.forEach(d => {
-        html += '<div style="border-top:1px solid var(--fs-border);padding:8px 0;font-size:13px;color:var(--fs-sub)"><s>' + fsEsc(d.desc) + '</s><div style="font-size:12px;color:var(--fs-faint)">rectified ' + fsEsc((d.closed || "").slice(0, 10)) + '</div></div>';
+        html += '<div style="border-top:1px solid var(--fs-border);padding:8px 0;font-size:13px;color:var(--fs-sub);display:flex;gap:10px;align-items:center"><div style="flex:1"><s>' + fsEsc(d.desc) + '</s><div style="font-size:12px;color:var(--fs-faint)">rectified ' + fsEsc((d.closed || "").slice(0, 10)) + (d.reopened ? ' &middot; was reopened ' + fsEsc((d.reopened || "").slice(0, 10)) : '') + '</div></div><button class="fsbtn fsDefReopen" data-id="' + fsEsc(d.id) + '" style="padding:2px 10px">&#8617; Reopen</button></div>';
       });
       html += '</details>';
     }
@@ -6793,14 +6839,26 @@ function fsRenderTab() {
   }
   if (fsTab === "files") {
     html += '<div class="fscard" style="padding:20px">';
-    html += '<div style="display:flex;align-items:center;margin-bottom:10px"><h3 style="font-size:16px;font-weight:700;flex:1">Files &amp; photos</h3><button class="fsbtn" id="fsFilesAdd">&#128247; Add photo</button></div>';
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap"><h3 style="font-size:16px;font-weight:700;flex:1">Files &amp; photos</h3><button class="fsbtn" id="fsFilesAdd">&#128247; Add photo</button><button class="fsbtn" id="fsFileAnyAdd">&#128206; Add file</button></div>';
     const ph = s.photos || [];
-    if (!ph.length) html += '<div style="color:var(--fs-faint);font-size:13.5px">No photos yet.</div>';
+    if (!ph.length && !(s.files || []).length) html += '<div style="color:var(--fs-faint);font-size:13.5px">No photos or files yet.</div>';
     else {
       html += '<div style="display:flex;gap:10px;flex-wrap:wrap">';
       ph.forEach((p, i) => {
         html += '<div style="position:relative"><img src="' + (p.src || p) + '" class="fsPhotoView" style="width:150px;height:110px;object-fit:cover;border-radius:10px;cursor:pointer" title="Tap to view full size">' +
           '<button class="fsbtn fsFileDel" data-i="' + i + '" style="position:absolute;top:4px;right:4px;padding:2px 8px;color:#c62828">&#10005;</button></div>';
+      });
+      html += '</div>';
+    }
+    const fls = s.files || [];
+    if (fls.length) {
+      html += '<div style="margin-top:14px"><div style="font-size:13px;font-weight:700;color:var(--fs-sub);margin-bottom:2px">Files</div>';
+      fls.forEach((f, i) => {
+        html += '<div style="display:flex;align-items:center;gap:10px;border-top:1px solid var(--fs-border);padding:9px 0">' +
+          '<div style="font-size:20px">&#128196;</div>' +
+          '<a class="fsFileOpen" data-i="' + i + '" style="flex:1;font-size:14px;font-weight:600;cursor:pointer;word-break:break-all">' + fsEsc(f.name || "file") + '</a>' +
+          '<div style="font-size:12px;color:var(--fs-sub2);white-space:nowrap">' + (f.size ? Math.max(1, Math.round(f.size / 1024)) + ' KB' : '') + '</div>' +
+          '<button class="fsbtn fsFileAnyDel" data-i="' + i + '" style="padding:2px 8px;color:#c62828">&#10005;</button></div>';
       });
       html += '</div>';
     }
@@ -6894,17 +6952,11 @@ function fsRenderTab() {
       const rec = (s.history || []).find(x => x.id === b.dataset.id);
       if (rec) fsTestPdf(rec);
     });
+    const atb = document.getElementById("fsAddTestBtn");
+    if (atb) atb.onclick = () => fsHistModalOpen(null);
     document.querySelectorAll(".fsHistEdit").forEach(b => b.onclick = () => {
       const rec = (s.history || []).find(x => x.id === b.dataset.id);
-      if (!rec) return;
-      const tech = prompt("Technician:", rec.tech || "");
-      if (tech === null) return;
-      const obs = prompt("Observations / comments:", rec.obs || "");
-      if (obs === null) return;
-      rec.tech = tech.trim();
-      rec.obs = obs.trim();
-      fsMarkDirty();
-      fsRenderTab();
+      if (rec) fsHistModalOpen(rec);
     });
     document.querySelectorAll(".fsHistDel").forEach(b => b.onclick = () => {
       const i = (s.history || []).findIndex(x => x.id === b.dataset.id);
@@ -6918,12 +6970,8 @@ function fsRenderTab() {
         s.defects = s.defects.filter(d => !raised.includes(d));
       }
       // roll back the cycle "last done" date if this record was the one that set it
-      const map = { monthly: "lastMonthly", sixMonthly: "last6m", annual: "lastAnnual", fiveYearly: "last5y" };
-      const key = map[rec.mode];
-      if (key && s.testing && s.testing[key] === (rec.finished || "").slice(0, 10)) {
-        const rest = s.history.filter(r => r.mode === rec.mode).map(r => (r.finished || "").slice(0, 10)).sort().reverse();
-        s.testing[key] = rest[0] || "";
-      }
+      const key = FS_HIST_KEY[rec.mode];
+      if (key && s.testing && s.testing[key] === (rec.finished || "").slice(0, 10)) fsHistRecalc(s, rec.mode);
       fsMarkDirty();
       fsRenderSite();
     });
@@ -6948,6 +6996,15 @@ function fsRenderTab() {
       if (!d) return;
       if (!confirm("Mark as rectified?\n\n" + d.desc)) return;
       d.closed = new Date().toISOString();
+      fsMarkDirty();
+      fsRenderSite();
+    });
+    document.querySelectorAll(".fsDefReopen").forEach(b => b.onclick = () => {
+      const d = (s.defects || []).find(x => x.id === b.dataset.id);
+      if (!d) return;
+      if (!confirm("Reopen this defect? (undoes an accidental Rectified tap)\n\n" + d.desc)) return;
+      d.closed = null;
+      d.reopened = new Date().toISOString();
       fsMarkDirty();
       fsRenderSite();
     });
@@ -7022,6 +7079,21 @@ function fsRenderTab() {
   }
   if (fsTab === "files") {
     document.getElementById("fsFilesAdd").onclick = () => { fsPhotoTarget = { kind:"files" }; document.getElementById("fsPhotoInput").click(); };
+    document.getElementById("fsFileAnyAdd").onclick = () => document.getElementById("fsFileAnyInput").click();
+    document.querySelectorAll(".fsFileOpen").forEach(a => a.onclick = () => {
+      const f = (s.files || [])[+a.dataset.i];
+      if (!f) return;
+      if ((f.mime || "").indexOf("image/") === 0) { fsViewPhoto(f.src); return; }
+      fetch(f.src).then(r => r.blob()).then(b => deliverFile(b, f.name || "file", f.mime || "application/octet-stream")).catch(() => alert("Couldn't open that file."));
+    });
+    document.querySelectorAll(".fsFileAnyDel").forEach(b => b.onclick = () => {
+      const f = (s.files || [])[+b.dataset.i];
+      if (!f) return;
+      if (!confirm('Delete file "' + (f.name || "file") + '" from this site?')) return;
+      s.files.splice(+b.dataset.i, 1);
+      fsMarkDirty();
+      fsRenderTab();
+    });
     document.querySelectorAll(".fsFileDel").forEach(b => {
       b.onclick = () => {
         if (!window.confirm("Delete this photo?")) return;
@@ -7652,6 +7724,110 @@ document.getElementById("fsPhotoInput").addEventListener("change", e => {
   proc(0);
 });
 
+/* ---- Files & photos: any-file attachments (23 Jul pass) ---- */
+document.getElementById("fsFileAnyInput").addEventListener("change", e => {
+  const all = [...(e.target.files || [])];
+  e.target.value = "";
+  if (!all.length || !fsSite) return;
+  const s2 = fsSite;
+  const big = [], bad = [];
+  let left = all.length;
+  const fin = () => {
+    if (--left > 0) return;
+    fsMarkDirty();
+    fsRenderSite();
+    if (big.length) alert("Too big to attach (over 8 MB \u2014 the register travels as a file, keep attachments small):\n" + big.join("\n"));
+    if (bad.length) alert("Couldn't read:\n" + bad.join("\n"));
+  };
+  all.forEach(f => {
+    if (f.size > 8 * 1024 * 1024) { big.push(f.name || "file"); fin(); return; }
+    const reader = new FileReader();
+    reader.onerror = () => { bad.push(f.name || "file"); fin(); };
+    reader.onload = () => {
+      s2.files = s2.files || [];
+      s2.files.push({ name: f.name || "file", mime: f.type || "", size: f.size || 0, src: reader.result, t: Date.now() });
+      fin();
+    };
+    reader.readAsDataURL(f);
+  });
+});
+
+/* ---- Test history: add / edit records (23 Jul pass - the "recorded a monthly as 6-monthly" fix) ---- */
+const FS_HIST_MODES = [["monthly", "Monthly"], ["sixMonthly", "6 monthly"], ["annual", "Annual"], ["fiveYearly", "5 yearly"], ["fullFunction", "Full Function"]];
+const FS_HIST_KEY = { monthly:"lastMonthly", sixMonthly:"last6m", annual:"lastAnnual", fiveYearly:"last5y", fullFunction:"lastFF" };
+function fsModeLabel(m) {
+  const md = fsChecklists && fsChecklists.modes && fsChecklists.modes[m];
+  if (md && md.label) return md.label;
+  const b = FS_HIST_MODES.find(x => x[0] === m);
+  return b ? b[1] : m;
+}
+function fsHistRecalc(s2, mode) {
+  const key = FS_HIST_KEY[mode];
+  if (!key) return;
+  s2.testing = s2.testing || {};
+  const dates = (s2.history || []).filter(r => r.mode === mode).map(r => (r.finished || "").slice(0, 10)).filter(Boolean).sort();
+  s2.testing[key] = dates[dates.length - 1] || "";
+}
+function fsHistBump(s2, mode, date) {
+  const key = FS_HIST_KEY[mode];
+  if (!key) return;
+  s2.testing = s2.testing || {};
+  if (!s2.testing[key] || date > s2.testing[key]) s2.testing[key] = date;
+}
+let fsHistTarget = null;   // null = adding a new record
+function fsHistModalOpen(rec) {
+  fsHistTarget = rec || null;
+  const modes = FS_HIST_MODES.map(x => x[0]);
+  Object.keys((fsChecklists && fsChecklists.modes) || {}).forEach(m => { if (modes.indexOf(m) < 0) modes.push(m); });
+  const use = modes.filter(m => (typeof fsCycModeOn !== "function" || fsCycModeOn(m)) || (rec && rec.mode === m));
+  const sel = document.getElementById("fsHmMode");
+  sel.innerHTML = use.map(m => '<option value="' + fsEsc(m) + '"' + (rec && rec.mode === m ? ' selected' : '') + '>' + fsEsc(fsModeLabel(m)) + '</option>').join("");
+  if (!rec && use.indexOf("monthly") >= 0) sel.value = "monthly";
+  document.getElementById("fsHmTitle").textContent = rec ? "Edit test record" : "Add a test record";
+  document.getElementById("fsHmNote").style.display = rec ? "none" : "block";
+  document.getElementById("fsHmDate").value = rec ? (rec.finished || "").slice(0, 10) : new Date().toISOString().slice(0, 10);
+  document.getElementById("fsHmTech").value = rec ? (rec.tech || "") : (localStorage.getItem("fs-user") || "");
+  document.getElementById("fsHmObs").value = rec ? (rec.obs || "") : "";
+  document.getElementById("fsHistModal").classList.add("show");
+}
+function fsHistModalSave() {
+  const s2 = fsSite;
+  if (!s2) return;
+  const mode = document.getElementById("fsHmMode").value;
+  const date = document.getElementById("fsHmDate").value;
+  const tech = document.getElementById("fsHmTech").value.trim();
+  const obs = document.getElementById("fsHmObs").value.trim();
+  if (!date) { alert("Pick the date the test was done."); return; }
+  if (tech) try { localStorage.setItem("fs-user", tech); } catch (e2) {}
+  s2.history = s2.history || [];
+  if (fsHistTarget) {
+    const rec = fsHistTarget, oldMode = rec.mode, oldDate = (rec.finished || "").slice(0, 10);
+    const oldKey = FS_HIST_KEY[oldMode];
+    const wasSetter = oldKey && s2.testing && s2.testing[oldKey] === oldDate;
+    const bits = [];
+    if (mode !== oldMode) bits.push("type " + fsModeLabel(oldMode) + " \u2192 " + fsModeLabel(mode));
+    if (date !== oldDate) bits.push("date " + (oldDate || "?") + " \u2192 " + date);
+    rec.mode = mode;
+    rec.label = fsModeLabel(mode);
+    rec.finished = date + (rec.finished && rec.finished.length > 10 ? rec.finished.slice(10) : "T12:00:00");
+    rec.tech = tech;
+    rec.obs = obs;
+    if (bits.length) { rec.edits = rec.edits || []; rec.edits.push({ at: new Date().toISOString(), what: bits.join(", ") }); }
+    if (wasSetter) fsHistRecalc(s2, oldMode);
+    fsHistBump(s2, mode, date);
+  } else {
+    s2.history.unshift({ id: "h" + Date.now() + Math.random().toString(16).slice(2, 6), mode: mode, label: fsModeLabel(mode),
+      started: date + "T09:00:00", finished: date + "T12:00:00", tech: tech, obs: obs, manual: true });
+    fsHistBump(s2, mode, date);
+  }
+  fsMarkDirty();
+  document.getElementById("fsHistModal").classList.remove("show");
+  fsHistTarget = null;
+  fsRenderSite();
+}
+document.getElementById("fsHmCancel").onclick = () => { document.getElementById("fsHistModal").classList.remove("show"); fsHistTarget = null; };
+document.getElementById("fsHmSave").onclick = fsHistModalSave;
+
 /* ---------- register load / save ---------- */
 let fsRegFileHandle = null;
 function fsLoadRegister(objIn) {
@@ -8272,7 +8448,7 @@ function fsFinishTest() {
   failedDev.forEach(d => addDef("dev:" + d.level + ":" + d.type + ":" + (d.zone || "") + ":" + (d.loop || "") + ":" + (d.dev || ""),
     d.type + (d.zone ? " Z" + d.zone : "") + (d.dev ? " D" + d.dev : "") + (d.info ? " — " + d.info : "") + " (failed device, " + d.level + ")"));
   site.testing = site.testing || {};
-  const map = { monthly: "lastMonthly", sixMonthly: "last6m", annual: "lastAnnual", fiveYearly: "last5y" };
+  const map = { monthly: "lastMonthly", sixMonthly: "last6m", annual: "lastAnnual", fiveYearly: "last5y", fullFunction: "lastFF" };
   if (map[fsSession.mode]) site.testing[map[fsSession.mode]] = rec.finished.slice(0, 10);
   fsMarkDirty();
   fsClearSession();
@@ -9716,6 +9892,25 @@ function fsMapsNavUrl(s) {
   return apple ? "https://maps.apple.com/?daddr=" + dest : "https://www.google.com/maps/dir/?api=1&destination=" + dest;
 }
 function fsPlNav(s) { window.open(fsMapsNavUrl(s), "_blank"); }
+/* coords button (23 Jul pass): pure "show me the spot" - the planner's Navigate stays on street address (C7 rule) */
+function fsCoordsParse(s2) {
+  const m = String((s2 && s2.coords) || "").match(/(-?\d{1,2}(?:\.\d+)?)[ ,;]+(-?\d{1,3}(?:\.\d+)?)/);
+  if (!m) return null;
+  const lat = parseFloat(m[1]), lng = parseFloat(m[2]);
+  if (isNaN(lat) || isNaN(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat: lat, lng: lng };
+}
+function fsCoordsUrl(s2) {
+  const g = fsCoordsParse(s2);
+  if (!g) return "";
+  const ll = g.lat + "," + g.lng;
+  const app = fsMapsApp();
+  if (app === "google") return "https://www.google.com/maps/search/?api=1&query=" + ll;
+  if (app === "waze") return "https://www.waze.com/ul?ll=" + ll + "&zoom=17";
+  const apple = /iPad|iPhone/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && "ontouchend" in document);
+  return apple ? "https://maps.apple.com/?ll=" + ll + "&q=" + encodeURIComponent((s2 && s2.name) || "Site")
+               : "https://www.google.com/maps/search/?api=1&query=" + ll;
+}
 async function fsPlUpdateTravel(relocate) {
   if (fsPlBusy) return;
   if (relocate && !confirm("Re-locate ALL sites from their addresses and rebuild every travel time?\nUse this after fixing addresses. Needs internet - takes about a second per site.")) return;
@@ -10551,7 +10746,7 @@ function fsModOn(path) {
   }
   return cur !== false;
 }
-const FS_CYC_MOD = { lastMonthly:"monthly", last6m:"sixMonthly", lastAnnual:"annual", last5y:"fiveYearly" };
+const FS_CYC_MOD = { lastMonthly:"monthly", last6m:"sixMonthly", lastAnnual:"annual", last5y:"fiveYearly", lastFF:"fullFunction" };
 function fsCycOn(key) { return fsModOn("cycles." + (FS_CYC_MOD[key] || key)); }
 function fsCycModeOn(mode) { return fsModOn("cycles." + mode); }
 
@@ -10988,7 +11183,7 @@ const FS_BLD_RES = [["battcalc", "Battery calculator"], ["timer", "Countdown tim
                     ["annuals", "Annuals converter"], ["pa", "PA announcements"], ["qrlookup", "Scan QR tag"], ["library", "Library"]];
 function fsBldGroups() {
   return [
-    ["Test cycles", "cycles", [["monthly", "Monthly"], ["sixMonthly", "6 monthly"], ["annual", "Annual"], ["fiveYearly", "5 yearly"]]],
+    ["Test cycles", "cycles", [["monthly", "Monthly"], ["sixMonthly", "6 monthly"], ["annual", "Annual"], ["fiveYearly", "5 yearly"], ["fullFunction", "Full Function"]]],
     ["General", "", [["planner", "Planner"], ["dashboard", "Dashboard (admin)"]]],
     ["Sections", "sections", [["service", "Service clients (register)"], ["projects", "Projects (job numbers)"]]],
     ["Workspace tools", "wsTools", (typeof TOOLS_TAB !== "undefined" ? TOOLS_TAB : []).map(t => [t.id, t.label])],
@@ -11006,7 +11201,7 @@ const FS_BLD_PRESETS = {
   service: st => { st.modules["sections.projects"] = false; },
   projects: st => {
     st.modules["sections.service"] = false;
-    ["cycles.monthly", "cycles.sixMonthly", "cycles.annual", "cycles.fiveYearly", "planner", "dashboard"].forEach(k => st.modules[k] = false);
+    ["cycles.monthly", "cycles.sixMonthly", "cycles.annual", "cycles.fiveYearly", "cycles.fullFunction", "planner", "dashboard"].forEach(k => st.modules[k] = false);
   }
 };
 function fsBuilderModalEl() {
