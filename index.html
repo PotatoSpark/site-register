@@ -157,6 +157,7 @@
   @media (max-width:720px) {
     #fsReg .wrap { padding:12px 10px 70px; }
     .fsCyc { flex:1 1 42% !important; min-width:0 !important; }
+    .fsPlDay.fsPlDrop { outline:2px dashed var(--fs-accent); outline-offset:-2px; background:rgba(37,150,171,.20) !important; }
     #fsReg h1 { font-size:24px !important; }
     .fstab { margin-right:14px; font-size:13.5px; padding:12px 2px; }
     .fsbtnP, .fsbtn { padding:12px 14px; }
@@ -166,7 +167,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.12 (fs 1.10)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.13 (fs 1.11)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -442,7 +443,7 @@
       <button class="btn" id="tStrike" style="text-decoration:line-through">S</button>
     </div>
     <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:14px;color:#e8e8e8">
-      <input type="checkbox" id="tBg" style="width:18px;height:18px"> White background box
+      <input type="checkbox" id="tBg" style="width:18px;height:18px"> Border box (white background)
     </label>
     <div class="row">
       <button class="btn" id="textCancel">Cancel</button>
@@ -486,8 +487,9 @@
 
 <div class="modal" id="photoViewModal">
   <div class="modalbox" style="max-width:92vw;width:auto">
-    <h3>Photo <span style="font-size:11px;color:#888">— draw on it with your finger/pen (uses selected colour)</span></h3>
-    <canvas id="photoViewCanvas" style="max-width:86vw;max-height:64vh;border:1px solid #555;border-radius:6px;background:#fff;touch-action:none"></canvas>
+    <h3>Photo <span style="font-size:11px;color:#888">— buttons to zoom · draw with finger/pen (selected colour)</span></h3>
+    <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center"><button class="btn" id="photoViewZOut" type="button" title="Zoom out">&#8722;</button><button class="btn" id="photoViewZIn" type="button" title="Zoom in">&#43;</button><button class="btn" id="photoViewFit" type="button">Fit</button><span id="photoViewZlbl" style="font-size:12px;color:#888"></span></div>
+    <div id="photoViewScroll" style="max-width:86vw;max-height:64vh;overflow:auto;border:1px solid #555;border-radius:6px;background:#fff;touch-action:auto"><canvas id="photoViewCanvas" style="display:block;background:#fff;touch-action:none"></canvas></div>
     <div class="row">
       <button class="btn primary" id="photoViewSave">Save</button>
       <button class="btn" id="photoViewClose">Cancel</button>
@@ -551,6 +553,7 @@
     <div style="font-weight:700;font-size:13px;color:#7ddb8f;margin:6px 0 4px">3 &middot; Panel report</div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
       <span id="annSrcName" style="flex:1;font-size:13px;color:#999">No file loaded</span>
+      <button class="btn" id="annFromPlan" title="Use the devices on THIS site's plan and tick each device's tested-year boxes in the workbook">&#128203; From this site's plan</button>
       <button class="btn" id="annSrcPick">Choose report&hellip;</button>
     </div>
     <div id="annStatus" style="font-size:12.5px;color:#aaa;margin-bottom:8px"></div>
@@ -2287,6 +2290,7 @@ function getHandles(o) {
 /* ================= Main draw ================= */
 let tempShape = null;    // shape preview while dragging
 let marquee = null;      // {x1,y1,x2,y2} screen coords
+let marqueeAdd = false;  // Multi/Shift at marquee start -> union sweep with existing selection
 let rotHandleScreen = null;   // screen pos of the free-rotate handle (set in draw)
 let rotDrag = null;           // { pivot, startAng, orig[] } while rotating
 
@@ -4559,9 +4563,30 @@ function openPhotoViewer(sym) {
     cvp.width = im.naturalWidth; cvp.height = im.naturalHeight;
     cvp.getContext("2d").drawImage(im, 0, 0);
     document.getElementById("photoViewModal").classList.add("show");
+    photoViewFit();
   };
   im.src = sym.photo;
 }
+let photoViewZoom = 1;
+function photoViewApplyZoom() {
+  const cvp = document.getElementById("photoViewCanvas");
+  if (!cvp || !cvp.width) return;
+  cvp.style.width = Math.round(cvp.width * photoViewZoom) + "px";
+  cvp.style.height = Math.round(cvp.height * photoViewZoom) + "px";
+  const lbl = document.getElementById("photoViewZlbl");
+  if (lbl) lbl.textContent = Math.round(photoViewZoom * 100) + "%";
+}
+function photoViewFit() {
+  const cvp = document.getElementById("photoViewCanvas"), sc = document.getElementById("photoViewScroll");
+  if (!cvp || !cvp.width || !sc) return;
+  const avail = sc.clientWidth || Math.min(window.innerWidth * 0.86, 800);
+  photoViewZoom = Math.min(1, avail / cvp.width);
+  if (!isFinite(photoViewZoom) || photoViewZoom <= 0) photoViewZoom = 1;
+  photoViewApplyZoom();
+}
+document.getElementById("photoViewZIn").onclick = () => { photoViewZoom = Math.min(6, photoViewZoom * 1.25); photoViewApplyZoom(); };
+document.getElementById("photoViewZOut").onclick = () => { photoViewZoom = Math.max(0.1, photoViewZoom / 1.25); photoViewApplyZoom(); };
+document.getElementById("photoViewFit").onclick = photoViewFit;
 document.getElementById("photoViewClose").onclick = () => {
   document.getElementById("photoViewModal").classList.remove("show");
   photoViewTarget = null;
@@ -5064,6 +5089,7 @@ cv.addEventListener("pointerdown", e => {
     } else {
       dragMode = "marquee";
       marquee = { x1:p.x, y1:p.y, x2:p.x, y2:p.y };
+      marqueeAdd = multiMode || e.shiftKey;
     }
     return;
   }
@@ -5296,11 +5322,12 @@ function endPointer(e) {
       });
       const gids = new Set(hits.filter(o => o.grp).map(o => o.grp));
       if (gids.size) hits = objects.filter(o => hits.includes(o) || (o.grp && gids.has(o.grp)));
-      setSelection(hits);
+      if (marqueeAdd) setSelection([...selection, ...hits.filter(h => !selection.includes(h))]);
+      else setSelection(hits);
     } else {
-      clearSelection();
+      if (!marqueeAdd) clearSelection();
     }
-    marquee = null; dragMode = null;
+    marquee = null; dragMode = null; marqueeAdd = false;
     draw();
     return;
   }
@@ -5601,7 +5628,7 @@ function refreshFmtBtns() {
   FMT_KEYS.forEach(k => document.getElementById(fmtBtns[k]).classList.toggle("toggled", !!fmtState[k]));
 }
 function stickyBg(kind) {
-  try { return localStorage.getItem("bpm-bg-" + kind) === "1"; } catch (e) { return kind === "callout"; }
+  try { const v = localStorage.getItem("bpm-bg-" + kind); return v === null ? kind === "callout" : v === "1"; } catch (e) { return kind === "callout"; }
 }
 function saveStickyBg(kind, val) {
   try { localStorage.setItem("bpm-bg-" + kind, val ? "1" : "0"); } catch (e) {}
@@ -8208,7 +8235,10 @@ function fsRenderTest() {
   }
 
   const def = fsChecklists.modes[fsSession.mode] || { label: fsSession.mode, sections: [] };
-  let html = '<h3 style="margin-bottom:2px">' + fsEsc(def.label) + ' test — ' + fsEsc(fsSiteCtx ? fsSiteCtx.siteName : "") + '</h3>';
+  let html = '<div style="position:sticky;top:-2px;z-index:5;background:#262a30;padding:6px 0 8px;margin:-2px 0 4px;border-bottom:1px solid #3a3f46;display:flex;align-items:center;gap:8px">' +
+    '<h3 style="margin:0;font-size:16px;flex:1;min-width:0">' + fsEsc(def.label) + ' test — ' + fsEsc(fsSiteCtx ? fsSiteCtx.siteName : "") + '</h3>' +
+    '<button class="btn" id="fsTestCloseTop" type="button" style="padding:6px 10px" title="Close but keep the test running">Close</button>' +
+    '<button class="btn danger" id="fsTestCancelTop" type="button" style="padding:6px 10px" title="Cancel and discard this test">Cancel</button></div>';
   html += '<div style="font-size:12px;color:#999;margin-bottom:10px">' + fsEsc(def.ref || "") + ' · started ' + fsSession.started.slice(0, 16).replace("T", " ") + (fsSession.tech ? ' · ' + fsEsc(fsSession.tech) : '') + '</div>';
   const isoL = fsIsoGateOn() ? fsIsoLines() : [];
   if (isoL.length) {
@@ -8387,6 +8417,11 @@ function fsRenderTest() {
     fsSaveSession();
   });
   document.getElementById("fsTestFinish").onclick = fsFinishTest;
+  const ctc = document.getElementById("fsTestCloseTop"); if (ctc) ctc.onclick = fsCloseTest;
+  const ctx2 = document.getElementById("fsTestCancelTop"); if (ctx2) ctx2.onclick = () => {
+    if (!confirm("Cancel this test? Checklist answers will be discarded (device ticks stay on the plan).")) return;
+    fsClearSession(); fsRenderTest();
+  };
 }
 
 function fsFinishTest() {
@@ -9602,7 +9637,7 @@ function fsPlAutoPlan(selIds, fromDk, toDk) {  // deterministic greedy day-fill;
 
 function fsPlStatusOverlay() {
   const d = document.createElement("div");
-  d.style.cssText = "position:fixed;inset:0;z-index:250;background:rgba(10,14,16,.72);display:flex;align-items:center;justify-content:center";
+  d.style.cssText = "position:fixed;inset:0;z-index:250;background:rgba(10,14,16,.97);display:flex;align-items:center;justify-content:center";
   d.innerHTML = '<div class="fscard" style="padding:22px 30px;font-weight:700;font-size:15px" id="fsPlStatusTxt">Working…</div>';
   document.body.appendChild(d);
   return { set: m => { d.querySelector("#fsPlStatusTxt").textContent = m; }, close: () => d.remove() };
@@ -9626,7 +9661,7 @@ async function fsPlPlanClick() {
 
 function fsPlPicker() {  // confirm/edit the month's to-do list before anything is scheduled
   const d = document.createElement("div");
-  d.style.cssText = "position:fixed;inset:0;z-index:250;background:rgba(10,14,16,.72);display:flex;align-items:center;justify-content:center;padding:16px";
+  d.style.cssText = "position:fixed;inset:0;z-index:250;background:rgba(10,14,16,.97);display:flex;align-items:center;justify-content:center;padding:16px";
   // sites planned LAST month are assumed recurring - pre-ticked alongside due sites
   const pv = new Date(+fsPlMonth.slice(0, 4), +fsPlMonth.slice(5, 7) - 2, 1);
   const pvKey = pv.getFullYear() + "-" + String(pv.getMonth() + 1).padStart(2, "0");
@@ -9739,7 +9774,7 @@ function fsPlPdf() {
 }
 function fsPlExportMenu() {
   const d = document.createElement("div");
-  d.style.cssText = "position:fixed;inset:0;z-index:250;background:rgba(10,14,16,.72);display:flex;align-items:center;justify-content:center;padding:16px";
+  d.style.cssText = "position:fixed;inset:0;z-index:250;background:rgba(10,14,16,.97);display:flex;align-items:center;justify-content:center;padding:16px";
   d.innerHTML = '<div class="fscard" style="padding:20px;max-width:420px;width:100%">' +
     '<h3 style="font-size:16px;font-weight:800;margin-bottom:10px">Export ' + fsPlMonthName() + '</h3>' +
     '<button class="fsbtn" id="fsPlExGridP" style="width:100%;text-align:left;margin-bottom:8px;padding:11px">&#128197; Month calendar &mdash; PDF</button>' +
@@ -10035,8 +10070,71 @@ function fsPlRender() {
     fsPlShowSettings = false;
     fsPlRender();
   };
-  document.querySelectorAll(".fsPlDay").forEach(td => td.onclick = () => { fsPlSelDay = td.dataset.dk === fsPlSelDay ? null : td.dataset.dk; fsPlRender(); });
+  document.querySelectorAll(".fsPlDay").forEach(td => td.onclick = () => { if (fsPlJustDragged) { fsPlJustDragged = false; return; } fsPlSelDay = td.dataset.dk === fsPlSelDay ? null : td.dataset.dk; fsPlRender(); });
+  fsPlWireDayDrag();
   fsPlWireDay();
+}
+let fsPlJustDragged = false;
+function fsPlMoveDay(fromDk, toDk) {
+  if (!fromDk || !toDk || fromDk === toDk) return;
+  const mo = fsPlMonthObj();
+  const src = mo.days[fromDk] || [];
+  if (!src.length) return;
+  mo.days[toDk] = (mo.days[toDk] || []).concat(src.map(x => Object.assign({}, x)));
+  delete mo.days[fromDk];
+  mo.locked = mo.locked || {};
+  mo.locked[toDk] = true;                 // manual placement - a re-plan keeps it
+  if (mo.locked[fromDk]) delete mo.locked[fromDk];
+  fsPlSavePlans();
+  fsPlSelDay = toDk;
+  fsPlRender();
+}
+function fsPlWireDayDrag() {
+  const mo = fsPlMonthObj();
+  let ghost = null;
+  const killGhost = () => { if (ghost) { ghost.remove(); ghost = null; } document.querySelectorAll(".fsPlDay.fsPlDrop").forEach(t => t.classList.remove("fsPlDrop")); };
+  document.querySelectorAll(".fsPlDay").forEach(td => {
+    const dk = td.dataset.dk;
+    if (!((mo.days[dk] || []).length)) return;   // only days that HAVE stops are draggable
+    td.addEventListener("pointerdown", e => {
+      if (e.button && e.button !== 0) return;
+      const sx = e.clientX, sy = e.clientY;
+      let dragging = false, holdTimer = null;
+      const cancelHold = () => { if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } };
+      const startDrag = () => {
+        dragging = true; fsPlJustDragged = true;
+        ghost = document.createElement("div");
+        ghost.textContent = "Move day \u2192";
+        ghost.style.cssText = "position:fixed;left:" + sx + "px;top:" + sy + "px;transform:translate(-50%,-150%);background:var(--fs-accent);color:#fff;font-size:12px;font-weight:800;padding:4px 9px;border-radius:8px;z-index:400;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.4)";
+        document.body.appendChild(ghost);
+      };
+      const onMove = ev => {
+        if (!dragging) { if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 12) cancelHold(); return; }
+        ev.preventDefault();
+        if (ghost) { ghost.style.left = ev.clientX + "px"; ghost.style.top = ev.clientY + "px"; }
+        const el = document.elementFromPoint(ev.clientX, ev.clientY);
+        const cell = el && el.closest ? el.closest(".fsPlDay") : null;
+        document.querySelectorAll(".fsPlDay.fsPlDrop").forEach(t => t.classList.remove("fsPlDrop"));
+        if (cell && cell.dataset.dk !== dk) cell.classList.add("fsPlDrop");
+      };
+      const onUp = ev => {
+        cancelHold();
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
+        if (dragging) {
+          const el = document.elementFromPoint(ev.clientX, ev.clientY);
+          const cell = el && el.closest ? el.closest(".fsPlDay") : null;
+          const toDk = cell && cell.dataset.dk;
+          killGhost();
+          if (toDk && toDk !== dk) fsPlMoveDay(dk, toDk);
+          setTimeout(() => { fsPlJustDragged = false; }, 60);
+        } else { killGhost(); }
+      };
+      holdTimer = setTimeout(() => { holdTimer = null; startDrag(); }, 200);
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+    });
+  });
 }
 function fsPlShiftMonth(d) {
   const y = +fsPlMonth.slice(0, 4), m = +fsPlMonth.slice(5, 7) - 1 + d;
@@ -10505,7 +10603,27 @@ async function annBuildXlsx(baseBuf, devices) {
       if (rm2[0].indexOf('t="s"><v>' + di + '</v>') >= 0) { hdrRow = +rm2[1]; break; }
     }
   }
+  if (hdrRow < 0) {
+    const rowReI = /<row r="(\d+)"[^>]*>[\s\S]*?<\/row>/g; let rmi;
+    while ((rmi = rowReI.exec(xml))) { if (/<t[^>]*>\s*DETECTOR\s*<\/t>/i.test(rmi[0])) { hdrRow = +rmi[1]; break; } }
+  }
   if (hdrRow < 0) hdrRow = 2;
+  // year columns (item 4, 24 Jul): scan the header row for 20xx labels -> {year: colLetter}
+  const annYearCols = {};
+  (function () {
+    const hr = xml.match(new RegExp('<row r="' + hdrRow + '"[^>]*>[\\s\\S]*?</row>'));
+    if (!hr) return;
+    const cRe = /<c r="([A-Z]+)\d+"([^>]*)>([\s\S]*?)<\/c>/g; let cm;
+    while ((cm = cRe.exec(hr[0]))) {
+      const col = cm[1], attrs = cm[2], inner = cm[3];
+      let txt = "";
+      const vm = inner.match(/<v>([^<]*)<\/v>/);
+      if (/t="s"/.test(attrs) && vm) txt = sst[+vm[1]] || "";
+      else { const im = inner.match(/<t[^>]*>([^<]*)<\/t>/); txt = im ? im[1] : (vm ? vm[1] : ""); }
+      const ym = String(txt).trim().match(/^(20\d{2})$/);
+      if (ym) annYearCols[+ym[1]] = col;
+    }
+  })();
   const setCell = (rowXml, col, rowNum, val, numeric) => {
     const ref = col + rowNum;
     const content = numeric ? '><v>' + val + '</v></c>' : ' t="inlineStr"><is><t xml:space="preserve">' + annXmlEsc(val) + '</t></is></c>';
@@ -10529,6 +10647,7 @@ async function annBuildXlsx(baseBuf, devices) {
     rx = setCell(rx, "B", rn, d.pt, false);
     rx = setCell(rx, "C", rn, d.label, false);
     rx = setCell(rx, "D", rn, d.type, false);
+    if (d.years && d.years.length) d.years.forEach(yy => { if (annYearCols[yy]) rx = setCell(rx, annYearCols[yy], rn, "X", false); });
     if (m3) xml = xml.replace(rowRe, () => rx);
     else xml = xml.replace("</sheetData>", rx + "</sheetData>");
   }
@@ -10633,6 +10752,26 @@ document.getElementById("annBaseInput").addEventListener("change", e => {
   rd.readAsDataURL(f);
 });
 document.getElementById("annSrcPick").onclick = () => document.getElementById("annSrcInput").click();
+document.getElementById("annFromPlan").onclick = () => {
+  const devs = annDevicesFromPlan();
+  if (!devs.length) {
+    annSay(false, "No registered devices found on this site's plan. Open the site's workspace (or make sure devices have a zone/loop/device number or a tested-year tick), then try again.");
+    document.getElementById("annTypes").style.display = "none"; annDevices = null; annSetButtons(); return;
+  }
+  annDevices = devs; annSrcFile = "site plan";
+  document.getElementById("annSrcName").textContent = "This site's plan \u2014 " + devs.length + " device" + (devs.length > 1 ? "s" : "");
+  const sn = (typeof fsSite !== "undefined" && fsSite && fsSite.name) ? fsSite.name : "";
+  const siteBox = document.getElementById("annSite");
+  if (sn && !siteBox.value.trim()) siteBox.value = sn;
+  annSay(true, devs.length + " devices from the plan. Their tested-year boxes (from the plan's year ticks) will be crossed in the workbook. Adjust the type list, then export.");
+  annTypeState = {};
+  devs.forEach(d => {
+    const k = d.grp + "|" + (d.type || "(no type)");
+    if (!annTypeState[k]) annTypeState[k] = { n: 0, grp: d.grp, type: d.type || "(no type)", on: true };
+    annTypeState[k].n++;
+  });
+  annRenderTypes();
+};
 document.getElementById("annSrcInput").addEventListener("change", async e => {
   const f = e.target.files[0]; e.target.value = "";
   if (!f) return;
@@ -10674,6 +10813,32 @@ document.getElementById("annSrcInput").addEventListener("change", async e => {
     annSetButtons();
   }
 });
+function annPlanObjects() {
+  if (typeof FS_WS_APP !== "undefined" && FS_WS_APP && typeof allLevelObjects === "function" &&
+      ((typeof objects !== "undefined" && objects.length) || (typeof levels !== "undefined" && levels.length))) {
+    return allLevelObjects();
+  }
+  const s = (typeof fsSite !== "undefined" && fsSite) ? fsSite : null;
+  if (s && s.plan) {
+    const out = [], proj = s.plan;
+    if (proj.levels && proj.levels.length) proj.levels.forEach(lv => (lv.objects || []).forEach(o => out.push({ o: o, level: lv.name })));
+    else if (proj.objects) proj.objects.forEach(o => out.push({ o: o, level: "Level 1" }));
+    return out;
+  }
+  return [];
+}
+function annDevicesFromPlan() {
+  const objs = annPlanObjects(), devs = [];
+  objs.forEach(entry => {
+    const o = entry.o;
+    if (!o || o.kind !== "sym" || o.type === "campin") return;
+    if (!(o.zone || o.loop || o.dev || (o.ty && o.ty.length))) return;   // registered devices only
+    const tdef = (typeof TYPE_MAP !== "undefined" && TYPE_MAP[o.type]) ? TYPE_MAP[o.type] : null;
+    devs.push({ zone: o.zone || "", pt: o.dev || "", label: o.info || "",
+      type: tdef ? tdef.label : (o.type || ""), grp: "det", years: (o.ty || []).slice() });
+  });
+  return devs;
+}
 function annSelected() { return (annDevices || []).filter(d => { const t = annTypeState && annTypeState[(d.grp || "det") + "|" + (d.type || "(no type)")]; return t && t.on; }); }
 function annRenderTypes() {
   const box = document.getElementById("annTypeList");
