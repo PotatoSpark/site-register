@@ -167,7 +167,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.14 (fs 1.12)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.16 (fs 1.14)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -623,6 +623,7 @@
     <button class="btn" id="fsResAnnuals" style="width:100%;text-align:left;margin-bottom:8px">&#128203; Fire Alarm Annuals converter</button>
     <button class="btn" id="fsResPa" style="width:100%;text-align:left;margin-bottom:8px">&#128226; PA announcements &mdash; record &amp; play</button>
     <button class="btn" id="fsResScan" style="width:100%;text-align:left;margin-bottom:8px">&#128269; Scan QR tag &mdash; find a device</button>
+    <button class="btn" id="fsResStore" style="width:100%;text-align:left;margin-bottom:8px">&#128190; Storage &amp; photos &mdash; see sizes, shrink photos</button>
     <!-- isolation gate hidden for V1.0 - set display:flex (and restore fsIsoGateOn) to reinstate --><label style="display:none;align-items:center;gap:8px;font-size:13.5px;margin-bottom:14px;cursor:pointer"><input type="checkbox" id="fsResIso"> Isolation restore gate on tests</label>
     <div style="font-weight:700;font-size:13px;color:#7ddb8f;margin-bottom:6px">LIBRARY</div>
     <div style="font-size:12px;color:#999;margin-bottom:8px">Reference documents (standards, manuals). Stored on this device only &mdash; add them once per device.</div>
@@ -632,11 +633,32 @@
     <div class="row" style="margin-top:14px"><button class="btn" id="fsResClose">Close</button></div>
   </div>
 </div>
+<div class="modal" id="fsStoreModal" style="z-index:121">
+  <div class="modalbox" style="max-width:520px;width:94vw;max-height:86vh;overflow-y:auto;text-align:left">
+    <h3 style="margin-bottom:4px">&#128190; Storage &amp; photos</h3>
+    <div style="font-size:12px;color:#999;margin-bottom:12px">Photos are almost all of a register's size. This shows where the space goes and can shrink them.</div>
+    <div id="fsStoreStats" style="font-size:13px;line-height:1.75"></div>
+    <div id="fsStoreSites" style="margin-top:12px"></div>
+    <div style="border-top:1px solid #3a4047;margin-top:14px;padding-top:12px">
+      <div style="font-weight:700;font-size:13px;color:#7ddb8f;margin-bottom:6px">SHRINK PHOTOS</div>
+      <div style="font-size:12px;color:#999;margin-bottom:10px">Re-saves every photo at a smaller size. Check the sample below first &mdash; panel labels and model numbers must stay readable. This cannot be undone except by restoring a backup.</div>
+      <div id="fsShrinkPrev" style="margin-bottom:10px"></div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;margin-bottom:5px;cursor:pointer"><input type="radio" name="fsShrinkLvl" value="light" checked> Light &mdash; same dimensions, lighter compression <span style="color:#7ddb8f">(recommended)</span></label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;margin-bottom:10px;cursor:pointer"><input type="radio" name="fsShrinkLvl" value="max"> Maximum &mdash; also reduces dimensions to 1400px</label>
+      <div id="fsShrinkEst" style="font-size:12.5px;color:#bbb;margin-bottom:10px"></div>
+      <div id="fsShrinkProg" style="font-size:12.5px;color:#7ddb8f;margin-bottom:10px;display:none"></div>
+      <button class="btn" id="fsShrinkRun" style="width:100%;text-align:center;background:#1b8a3f;border-color:#2fae57;color:#fff;font-weight:700">Shrink all photos</button>
+    </div>
+    <div class="row" style="margin-top:14px"><button class="btn" id="fsStoreClose">Close</button></div>
+  </div>
+</div>
 <div class="modal" id="fsFileModal" style="z-index:120">
   <div class="modalbox" style="max-width:430px;text-align:left">
     <h3 style="margin-bottom:4px">&#128193; Register file</h3>
     <div style="font-size:12px;color:#999;margin-bottom:10px">One file holds everything &mdash; clients, sites, plans, tests and photos. Save after changes; share via OneDrive. Backups live in &#9881; Settings.</div>
     <div id="fsFileSlots" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
+    <button class="btn" id="fsSaveBundleBtn" style="width:100%;text-align:left">&#128230; Save as .fsbundle &mdash; smaller, new format&hellip;</button>
+    <button class="btn" id="fsSaveJsonBtn" style="width:100%;text-align:left">&#128196; Save as single .json &mdash; old format&hellip;</button>
     <button class="btn" id="fsExpClientBtn" style="width:100%;text-align:left">&#128100; Export ONE client as its own register&hellip;</button>
     <div class="row" style="margin-top:14px"><button class="btn" id="fsFileClose">Close</button></div>
   </div>
@@ -6413,7 +6435,7 @@ async function fsSplitReg(reg) {
   return { idx: idx, blobs: blobs, plans: plans, bytes: bytes };
 }
 /* put the images and plans back, so the in-memory register looks untouched */
-async function fsJoinReg(idx) {
+async function fsJoinWith(idx, getB, getP) {
   async function walk(v) {
     if (!v || typeof v !== "object") return v;
     if (Array.isArray(v)) {
@@ -6421,15 +6443,8 @@ async function fsJoinReg(idx) {
       for (let i = 0; i < v.length; i++) out.push(await walk(v[i]));
       return out;
     }
-    if (typeof v.__b === "string") {
-      const d = await idbGet("fsBlob:" + v.__b);
-      if (typeof d === "string") { fsBlobHashes.set(d, v.__b); return d; }
-      return "";
-    }
-    if (typeof v.__p === "string") {
-      const p = await idbGet("fsPlan:" + v.__p);
-      return p || null;
-    }
+    if (typeof v.__b === "string") return await getB(v.__b);
+    if (typeof v.__p === "string") return await getP(v.__p);
     const out = {};
     for (const k in v) {
       if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
@@ -6438,6 +6453,15 @@ async function fsJoinReg(idx) {
     return out;
   }
   return await walk(idx);
+}
+async function fsJoinReg(idx) {
+  return await fsJoinWith(idx,
+    async h => {
+      const d = await idbGet("fsBlob:" + h);
+      if (typeof d === "string") { fsBlobHashes.set(d, h); return d; }
+      return "";
+    },
+    async id => (await idbGet("fsPlan:" + id)) || null);
 }
 async function fsWriteParts(sp) {
   if (!fsBlobHave) {
@@ -6494,6 +6518,207 @@ async function fsReadReg() {
   if (!idx || !idx.clients) return null;
   return await fsJoinReg(idx);
 }
+/* ================= Bundle file format (.fsbundle) - Stage 1B =================
+   A plain zip, stored not compressed (JPEGs do not compress), laid out the way
+   the parts will eventually sit in cloud storage:
+
+       manifest.json          everything except the sites
+       sites/<siteId>.json    ONE FILE PER SITE - this is what a per-site lock will hold
+       plans/<ownerId>.json   block plans
+       blobs/<sha256>.jpg     photos as REAL BYTES, not base64 (base64 costs 33%)
+
+   Reading accepts this AND the old single .json. Saving keeps whatever format the
+   open file already uses, so nobody's workflow changes underneath them - switching
+   is a deliberate choice from the register-file menu. */
+let fsBundleMode = false;          /* true once a .fsbundle has been loaded */
+const FS_B_EXT  = { "image/jpeg":"jpg", "image/png":"png", "image/webp":"webp", "image/gif":"gif" };
+const FS_B_MIME = { jpg:"image/jpeg", png:"image/png", webp:"image/webp", gif:"image/gif" };
+
+/* fsCrc32 + FS_CRC_T already exist (the annuals converter writes xlsx, also a zip) - reused here */
+function fsDataUrlBytes(d) {
+  const i = d.indexOf(",");
+  const b = atob(d.slice(i + 1));
+  const u = new Uint8Array(b.length);
+  for (let j = 0; j < b.length; j++) u[j] = b.charCodeAt(j);
+  return u;
+}
+function fsBytesDataUrl(u, mime) {
+  let s = "";
+  const CH = 0x8000;                 /* chunked: apply() blows the stack on big images */
+  for (let i = 0; i < u.length; i += CH) s += String.fromCharCode.apply(null, u.subarray(i, i + CH));
+  return "data:" + (mime || "image/jpeg") + ";base64," + btoa(s);
+}
+/* zip writer - stored entries only */
+function fsBZip(entries) {
+  const enc = new TextEncoder();
+  const now = new Date();
+  const dt = ((now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1)) & 0xFFFF;
+  const dd = (((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate()) & 0xFFFF;
+  const parts = [], central = [];
+  let off = 0;
+  for (const e of entries) {
+    const nm = enc.encode(e.name), crc = fsCrc32(e.data), len = e.data.length;
+    const lh = new Uint8Array(30 + nm.length), lv = new DataView(lh.buffer);
+    lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true); lv.setUint16(6, 0x0800, true);
+    lv.setUint16(8, 0, true); lv.setUint16(10, dt, true); lv.setUint16(12, dd, true);
+    lv.setUint32(14, crc, true); lv.setUint32(18, len, true); lv.setUint32(22, len, true);
+    lv.setUint16(26, nm.length, true); lv.setUint16(28, 0, true);
+    lh.set(nm, 30);
+    parts.push(lh, e.data);
+    const ch = new Uint8Array(46 + nm.length), cv = new DataView(ch.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true); cv.setUint16(10, 0, true);
+    cv.setUint16(12, dt, true); cv.setUint16(14, dd, true);
+    cv.setUint32(16, crc, true); cv.setUint32(20, len, true); cv.setUint32(24, len, true);
+    cv.setUint16(28, nm.length, true); cv.setUint32(42, off, true);
+    ch.set(nm, 46);
+    central.push(ch);
+    off += lh.length + len;
+  }
+  const cdSize = central.reduce((a, b) => a + b.length, 0);
+  const eo = new Uint8Array(22), ev = new DataView(eo.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, entries.length, true); ev.setUint16(10, entries.length, true);
+  ev.setUint32(12, cdSize, true); ev.setUint32(16, off, true);
+  return new Blob(parts.concat(central, [eo]), { type:"application/zip" });
+}
+/* zip reader - stored entries, plus deflate if the file was re-zipped by something else */
+async function fsBUnzip(buf) {
+  const u = new Uint8Array(buf);
+  const dv = new DataView(u.buffer, u.byteOffset, u.byteLength);
+  let eo = -1;
+  for (let i = u.length - 22; i >= 0 && i > u.length - 66000; i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eo = i; break; }
+  }
+  if (eo < 0) throw new Error("That file isn't a FireSpark bundle.");
+  const n = dv.getUint16(eo + 10, true);
+  let p = dv.getUint32(eo + 16, true);
+  const dec = new TextDecoder();
+  const out = new Map();
+  for (let i = 0; i < n; i++) {
+    if (p + 46 > u.length || dv.getUint32(p, true) !== 0x02014b50) break;
+    const meth = dv.getUint16(p + 10, true);
+    const size = dv.getUint32(p + 24, true);
+    const nl = dv.getUint16(p + 28, true), el = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true);
+    const lo = dv.getUint32(p + 42, true);
+    const name = dec.decode(u.subarray(p + 46, p + 46 + nl));
+    const lnl = dv.getUint16(lo + 26, true), lel = dv.getUint16(lo + 28, true);
+    const ds = lo + 30 + lnl + lel;
+    let data = u.subarray(ds, ds + dv.getUint32(p + 20, true));
+    if (meth === 8) {
+      if (typeof DecompressionStream === "undefined") throw new Error("This bundle was re-zipped with compression, which this device can't open. Use the original file.");
+      const rs = new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      data = new Uint8Array(await new Response(rs).arrayBuffer());
+    } else if (meth !== 0) {
+      throw new Error("Unsupported compression in the bundle.");
+    }
+    out.set(name, data.length === size ? data : data.subarray(0, size));
+    p += 46 + nl + el + cl;
+  }
+  return out;
+}
+async function fsBuildBundle(reg) {
+  const sp = await fsSplitReg(reg);
+  const enc = new TextEncoder();
+  const idx = sp.idx, files = [], man = {};
+  for (const k in idx) if (k !== "clients") man[k] = idx[k];
+  man.app = "firespark-bundle"; man.bundle = 1;
+  man.clients = (idx.clients || []).map(c => {
+    const cc = {};
+    for (const k in c) if (k !== "sites") cc[k] = c[k];
+    cc.siteIds = (c.sites || []).map(s => s.id);
+    return cc;
+  });
+  files.push({ name:"manifest.json", data: enc.encode(JSON.stringify(man)) });
+  (idx.clients || []).forEach(c => (c.sites || []).forEach(s => {
+    files.push({ name:"sites/" + s.id + ".json", data: enc.encode(JSON.stringify(s)) });
+  }));
+  sp.plans.forEach((pl, id) => files.push({ name:"plans/" + id + ".json", data: enc.encode(JSON.stringify(pl)) }));
+  sp.blobs.forEach((d, h) => {
+    const semi = d.indexOf(";");
+    const m = semi > 5 ? d.slice(5, semi).toLowerCase() : "";
+    const ext = FS_B_EXT[m];
+    if (ext) files.push({ name:"blobs/" + h + "." + ext, data: fsDataUrlBytes(d) });
+    else files.push({ name:"blobs/" + h + ".b64", data: enc.encode(d) });   /* PDFs and anything else, kept exactly */
+  });
+  return fsBZip(files);
+}
+async function fsReadBundle(buf) {
+  const ent = await fsBUnzip(buf);
+  const dec = new TextDecoder();
+  const mj = ent.get("manifest.json");
+  if (!mj) throw new Error("That bundle has no manifest.");
+  const man = JSON.parse(dec.decode(mj));
+  const blobs = new Map(), plans = new Map();
+  ent.forEach((v, k) => {
+    if (k.indexOf("blobs/") === 0) {
+      const dot = k.lastIndexOf(".");
+      if (dot < 0) return;
+      const h = k.slice(6, dot), ext = k.slice(dot + 1).toLowerCase();
+      blobs.set(h, ext === "b64" ? dec.decode(v) : fsBytesDataUrl(v, FS_B_MIME[ext] || "image/jpeg"));
+    } else if (k.indexOf("plans/") === 0) {
+      const dot = k.lastIndexOf(".");
+      if (dot > 0) plans.set(k.slice(6, dot), JSON.parse(dec.decode(v)));
+    }
+  });
+  const idx = {};
+  for (const k in man) if (k !== "clients" && k !== "bundle") idx[k] = man[k];
+  idx.app = "firespark-register";
+  idx.clients = (man.clients || []).map(c => {
+    const cc = {};
+    for (const k in c) if (k !== "siteIds") cc[k] = c[k];
+    cc.sites = (c.siteIds || []).map(id => {
+      const f = ent.get("sites/" + id + ".json");
+      return f ? JSON.parse(dec.decode(f)) : null;
+    }).filter(Boolean);
+    return cc;
+  });
+  return await fsJoinWith(idx, h => blobs.get(h) || "", id => plans.get(id) || null);
+}
+/* one door for both formats - the first four bytes say which */
+async function fsLoadFromBuffer(buf) {
+  const u = new Uint8Array(buf);
+  if (u.length > 4 && u[0] === 0x50 && u[1] === 0x4B && u[2] === 0x03 && u[3] === 0x04) {
+    const reg = await fsReadBundle(buf);
+    if (!reg || !reg.clients) throw new Error("That bundle doesn't contain a register.");
+    fsBundleMode = true;
+    fsLoadRegister(reg);
+    return;
+  }
+  const d = JSON.parse(new TextDecoder().decode(u));
+  if (!d.clients) throw new Error("That file doesn't look like a client register.");
+  fsBundleMode = false;
+  fsLoadRegister(d);
+}
+function fsSaveIsBundle() {
+  if (fsRegFileHandle && fsRegFileHandle.name) return /\.fsbundle$/i.test(fsRegFileHandle.name);
+  return fsBundleMode;
+}
+async function fsRegisterBlob(asBundle) {
+  return asBundle ? await fsBuildBundle(fsRegister)
+                  : new Blob([JSON.stringify(fsRegister)], { type:"application/json" });
+}
+/* deliberate format switch, from the register-file menu */
+async function fsSaveAsFormat(asBundle) {
+  if (!fsRegister) return;
+  let who = "";
+  try { who = localStorage.getItem("fs-user") || ""; } catch (e) {}
+  fsRegister.updated = new Date().toISOString().slice(0, 10);
+  if (who) fsRegister.savedBy = who;
+  const blob = await fsRegisterBlob(asBundle);
+  const ext = asBundle ? ".fsbundle" : ".json";
+  const how = await deliverFile(blob, "firespark-register-" + fsRegister.updated + ext,
+                                asBundle ? "application/zip" : "application/json");
+  if (how === "cancelled") { alert("⚠ Save cancelled — nothing was written."); return; }
+  fsBundleMode = asBundle;
+  fsRegFileHandle = null;              /* it's a new file now; Save writes back to it once reopened */
+  fsDirty = false; fsStamp();
+  alert("✓ Saved as " + (asBundle ? "a .fsbundle" : "a single .json") +
+        ".\n\nOpen that new file with 📂 Load next time so Save writes straight back to it." +
+        (asBundle ? "\n\nColleagues need this version of the app (or newer) to open a .fsbundle." : ""));
+  fsBackupSnapshot("saved");
+}
+
 /* drop images no longer referenced by the register or any kept backup */
 async function fsBlobGC() {
   try {
@@ -8054,14 +8279,17 @@ async function fsPickRegister() {
   if (fsDirty && !confirm("You have UNSAVED register changes — loading a file will replace them. Continue?")) return;
   if (window.showOpenFilePicker) {
     try {
-      const [h] = await window.showOpenFilePicker({ types:[{ description:"FireSpark register", accept:{ "application/json":[".json"] } }] });
+      const [h] = await window.showOpenFilePicker({ types:[{ description:"FireSpark register", accept:{ "application/zip":[".fsbundle"], "application/json":[".json"] } }] });
       const f = await h.getFile();
-      const d = JSON.parse(await f.text());
-      if (!d.clients) { alert("That file doesn't look like a client register."); return; }
       fsRegFileHandle = h;
-      fsLoadRegister(d);
+      await fsLoadFromBuffer(await f.arrayBuffer());
       return;
-    } catch (e) { if (e && (e.name === "AbortError" || e.name === "NotAllowedError")) return; }
+    } catch (e) {
+      if (e && (e.name === "AbortError" || e.name === "NotAllowedError")) return;
+      fsRegFileHandle = null;
+      alert(e && e.message ? e.message : "Couldn't read that register file.");
+      return;
+    }
   }
   document.getElementById("fsRegInput").click();
 }
@@ -8110,14 +8338,12 @@ document.getElementById("fsRegInput").addEventListener("change", e => {
   e.target.value = "";
   if (!f) return;
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
     try {
-      const d = JSON.parse(reader.result);
-      if (!d.clients) { alert("That file doesn't look like a client register."); return; }
-      fsLoadRegister(d);
-    } catch (err) { alert("Couldn't read that register file."); }
+      await fsLoadFromBuffer(reader.result);
+    } catch (err) { alert(err && err.message ? err.message : "Couldn't read that register file."); }
   };
-  reader.readAsText(f);
+  reader.readAsArrayBuffer(f);
 });
 document.getElementById("fsDemoBtn").onclick = () => {
   fsLoadRegister({
@@ -8141,12 +8367,13 @@ document.getElementById("fsExportReg").onclick = async () => {
   }
   fsRegister.updated = new Date().toISOString().slice(0, 10);
   fsRegister.savedBy = who;
-  const json = JSON.stringify(fsRegister);
+  const asBundle = fsSaveIsBundle();
+  const payload = await fsRegisterBlob(asBundle);
   if (fsRegFileHandle) {
     await fsBackupSnapshot("saved");
     try {
       const w = await fsRegFileHandle.createWritable();
-      await w.write(json);
+      await w.write(payload);
       await w.close();
       fsDirty = false;
       fsStamp();
@@ -8156,8 +8383,9 @@ document.getElementById("fsExportReg").onclick = async () => {
   }
   fsDirty = false;
   fsStamp();
-  deliverFile(new Blob([json], { type:"application/json" }),
-    "firespark-register-" + fsRegister.updated + ".json", "application/json").then(how => {   // deliver inside the tap (iOS share needs the fresh gesture), THEN back up
+  deliverFile(payload,
+    "firespark-register-" + fsRegister.updated + (asBundle ? ".fsbundle" : ".json"),
+    asBundle ? "application/zip" : "application/json").then(how => {   // deliver inside the tap (iOS share needs the fresh gesture), THEN back up
       if (how === "cancelled") {
         fsDirty = true; fsStamp();
         alert("\u26a0 Save cancelled \u2014 the register was NOT saved to a file. Your changes are still only on this device \u2014 press Save register again when ready.");
@@ -8750,8 +8978,238 @@ document.getElementById("fsResBatt").onclick = () => openBattCalc();
 document.getElementById("fsResTimer").onclick = () => { document.getElementById("fsResModal").classList.remove("show"); openTimer(); };
 document.getElementById("fsResMeter").onclick = () => { document.getElementById("fsResModal").classList.remove("show"); openMeter(); };
 
+/* ================= Storage & photos (Stage 1C) =================
+   Reads the split store written in 1A and reports where the space goes,
+   then optionally re-encodes every photo smaller. Shrinking mutates the
+   in-memory register, so the saving lands in the register FILE as soon as
+   it is saved. Device space comes back more slowly, because older backups
+   still reference the previous copies until they roll off. ================= */
+function fsIsImgStr(v) { return typeof v === "string" && v.length >= FS_BLOB_MIN && v.slice(0, 5) === "data:"; }
+function fsMB(n) { return (n / 1048576).toFixed(n < 10485760 ? 2 : 1) + " MB"; }
+
+/* every image string in the register, with how many places each is used */
+function fsImageCensus(reg) {
+  const uses = new Map();
+  let refs = 0;
+  const walk = v => {
+    if (typeof v === "string") return;
+    if (!v || typeof v !== "object") return;
+    if (Array.isArray(v)) { v.forEach(x => { if (fsIsImgStr(x)) { refs++; uses.set(x, (uses.get(x) || 0) + 1); } else walk(x); }); return; }
+    for (const k in v) {
+      if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
+      const x = v[k];
+      if (fsIsImgStr(x)) { refs++; uses.set(x, (uses.get(x) || 0) + 1); }
+      else walk(x);
+    }
+  };
+  walk(reg);
+  let bytes = 0;
+  uses.forEach((n, s) => { bytes += s.length; });
+  return { uses: uses, refs: refs, unique: uses.size, bytes: bytes };
+}
+
+/* bytes of images under one site (including its buildings) */
+function fsSiteImageBytes(s) {
+  const c = fsImageCensus({ x: s });
+  return c.bytes;
+}
+
+function fsReEncode(dataUrl, maxPx, q) {
+  return new Promise(res => {
+    const im = new Image();
+    im.onerror = () => res(null);
+    im.onload = () => {
+      try {
+        const big = Math.max(im.naturalWidth, im.naturalHeight);
+        const sc = Math.min(1, maxPx / big);
+        const c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(im.naturalWidth * sc));
+        c.height = Math.max(1, Math.round(im.naturalHeight * sc));
+        c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+        res(c.toDataURL("image/jpeg", q));
+      } catch (e) { res(null); }
+    };
+    im.src = dataUrl;
+  });
+}
+const FS_SHRINK = { light: { px: 100000, q: 0.72 }, max: { px: 1400, q: 0.62 } };
+function fsShrinkLevel() {
+  const el = document.querySelector('input[name="fsShrinkLvl"]:checked');
+  return (el && el.value === "max") ? "max" : "light";
+}
+
+/* a 1:1 centre crop of the biggest photo at each setting, so artefacts are
+   judged at real pixel scale rather than shrunk into a thumbnail */
+async function fsShrinkPreview() {
+  const box = document.getElementById("fsShrinkPrev");
+  if (!fsRegister) { box.innerHTML = ""; return; }
+  const cen = fsImageCensus(fsRegister);
+  if (!cen.unique) { box.innerHTML = '<div style="font-size:12.5px;color:#777">No photos in this register yet.</div>'; return; }
+  let biggest = "";
+  cen.uses.forEach((n, s) => { if (s.length > biggest.length) biggest = s; });
+  box.innerHTML = '<div style="font-size:12.5px;color:#999">Preparing sample…</div>';
+  const lv = FS_SHRINK[fsShrinkLevel()];
+  const shrunk = await fsReEncode(biggest, lv.px, lv.q);
+  const crop = (src, label, bytes) => new Promise(res => {
+    const im = new Image();
+    im.onerror = () => res("");
+    im.onload = () => {
+      const w = 150, h = 110;
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const sx = Math.max(0, (im.naturalWidth - w) / 2), sy = Math.max(0, (im.naturalHeight - h) / 2);
+      c.getContext("2d").drawImage(im, sx, sy, w, h, 0, 0, w, h);
+      res('<div style="text-align:center"><img src="' + c.toDataURL("image/jpeg", 0.95) + '" style="width:' + w + 'px;height:' + h + 'px;border-radius:5px;border:1px solid #3a4047"><div style="font-size:11px;color:#999;margin-top:3px">' + label + '<br>' + Math.round(bytes / 1024) + ' KB</div></div>');
+    };
+    im.src = src;
+  });
+  const a = await crop(biggest, "Now", biggest.length);
+  const b = shrunk ? await crop(shrunk, "After", shrunk.length) : "";
+  box.innerHTML = '<div style="font-size:12px;color:#999;margin-bottom:5px">Sample — actual pixels, largest photo, centre crop:</div>' +
+    '<div style="display:flex;gap:10px;flex-wrap:wrap">' + a + b + '</div>';
+}
+
+async function fsShrinkEstimate() {
+  const el = document.getElementById("fsShrinkEst");
+  if (!fsRegister) { el.textContent = ""; return; }
+  const cen = fsImageCensus(fsRegister);
+  if (!cen.unique) { el.textContent = ""; return; }
+  el.textContent = "Estimating…";
+  const all = Array.from(cen.uses.keys());
+  const step = Math.max(1, Math.floor(all.length / 6));
+  const lv = FS_SHRINK[fsShrinkLevel()];
+  let before = 0, after = 0, n = 0;
+  for (let i = 0; i < all.length && n < 6; i += step, n++) {
+    const out = await fsReEncode(all[i], lv.px, lv.q);
+    before += all[i].length;
+    after += (out && out.length < all[i].length) ? out.length : all[i].length;
+  }
+  if (!before) { el.textContent = ""; return; }
+  const ratio = after / before;
+  const now = cen.bytes, then = Math.round(cen.bytes * ratio);
+  el.innerHTML = "Estimated on " + n + " sample photos: <b>" + fsMB(now) + " → " + fsMB(then) +
+    "</b> (about " + Math.max(0, Math.round((1 - ratio) * 100)) + "% smaller)";
+}
+
+async function fsShrinkAll() {
+  if (!fsRegister) return;
+  const cen = fsImageCensus(fsRegister);
+  if (!cen.unique) { alert("There are no photos to shrink."); return; }
+  const lvName = fsShrinkLevel();
+  if (!confirm("Shrink " + cen.unique + " photo" + (cen.unique > 1 ? "s" : "") + " (" + fsMB(cen.bytes) + ")?\n\n" +
+    (lvName === "max" ? "Maximum: dimensions reduced to 1400px.\n\n" : "Light: same dimensions, lighter compression.\n\n") +
+    "A backup is taken first. Save the register afterwards to keep the change.")) return;
+  await fsBackupSnapshot("before shrink");
+  const lv = FS_SHRINK[lvName];
+  const prog = document.getElementById("fsShrinkProg");
+  const btn = document.getElementById("fsShrinkRun");
+  prog.style.display = "block"; btn.disabled = true;
+  const map = new Map();
+  const all = Array.from(cen.uses.keys());
+  let done = 0, before = 0, after = 0, skipped = 0;
+  for (const src of all) {
+    const out = await fsReEncode(src, lv.px, lv.q);
+    before += src.length;
+    if (out && out.length < src.length) { map.set(src, out); after += out.length; }
+    else { after += src.length; skipped++; }
+    done++;
+    prog.textContent = "Shrinking " + done + " of " + all.length + "…";
+  }
+  /* swap the strings in place - the register object itself is not restructured */
+  const swap = v => {
+    if (!v || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (let i = 0; i < v.length; i++) {
+        if (fsIsImgStr(v[i])) { const n = map.get(v[i]); if (n) v[i] = n; }
+        else swap(v[i]);
+      }
+      return;
+    }
+    for (const k in v) {
+      if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
+      if (fsIsImgStr(v[k])) { const n = map.get(v[k]); if (n) v[k] = n; }
+      else swap(v[k]);
+    }
+  };
+  swap(fsRegister);
+  fsMarkDirty();
+  await fsPersistReg(true);
+  try { await fsBlobGC(); } catch (e) {}
+  prog.style.display = "none"; btn.disabled = false;
+  await fsStoreRender();
+  alert("✓ Photos shrunk.\n\n" + fsMB(before) + " → " + fsMB(after) +
+    " (" + Math.max(0, Math.round((1 - after / before) * 100)) + "% smaller)" +
+    (skipped ? "\n" + skipped + " already small enough, left alone." : "") +
+    "\n\nSave the register now to keep it. A backup from before this was kept in ⚙ Settings.");
+}
+
+async function fsStoreRender() {
+  const stats = document.getElementById("fsStoreStats");
+  const sitesBox = document.getElementById("fsStoreSites");
+  if (!fsRegister) { stats.textContent = "Load a register first."; sitesBox.innerHTML = ""; return; }
+  const cen = fsImageCensus(fsRegister);
+  let blobBytes = 0, blobN = 0, planBytes = 0, planN = 0, idxBytes = 0;
+  try {
+    for (const k of await fsStoreKeys()) {
+      const ks = String(k);
+      if (ks.indexOf("fsBlob:") === 0) { const v = await idbGet(k); blobBytes += (v || "").length; blobN++; }
+      else if (ks.indexOf("fsPlan:") === 0) { const v = await idbGet(k); planBytes += JSON.stringify(v || null).length; planN++; }
+      else if (ks === "fsIdx") { idxBytes = JSON.stringify(await idbGet(k)).length; }
+    }
+  } catch (e) {}
+  let quota = "";
+  try {
+    if (navigator.storage && navigator.storage.estimate) {
+      const q = await navigator.storage.estimate();
+      if (q && q.quota) quota = '<div style="color:#999">Browser allowance on this device: <b>' + fsMB(q.usage || 0) + "</b> used of " + fsMB(q.quota) + "</div>";
+    }
+  } catch (e) {}
+  const dupes = cen.refs - cen.unique;
+  stats.innerHTML =
+    '<div><b>' + cen.refs + '</b> photo' + (cen.refs === 1 ? '' : 's') + ' in the register &mdash; <b>' + fsMB(cen.bytes) + '</b></div>' +
+    (dupes > 0 ? '<div style="color:#7ddb8f">' + dupes + ' of those are repeats and are only stored once</div>' : '') +
+    '<div style="margin-top:6px;color:#999">On this device: ' + blobN + ' image file' + (blobN === 1 ? '' : 's') + ' (' + fsMB(blobBytes) + ') &middot; ' +
+    planN + ' plan' + (planN === 1 ? '' : 's') + ' (' + fsMB(planBytes) + ') &middot; index ' + Math.round(idxBytes / 1024) + ' KB</div>' +
+    quota +
+    '<div style="margin-top:6px;color:#7ddb8f">As a .fsbundle this register would be about <b>' +
+      fsMB(Math.round(cen.bytes * 0.75) + Math.max(0, JSON.stringify(fsRegister).length - cen.bytes)) +
+      '</b> instead of ' + fsMB(JSON.stringify(fsRegister).length) +
+      ' &mdash; switch from &#128193; Register file.</div>';
+
+  const rows = [];
+  (fsRegister.clients || []).forEach(c => (c.sites || []).forEach(s => {
+    const b = fsSiteImageBytes(s);
+    if (b > 0) rows.push({ n: s.name || "(unnamed site)", b: b });
+  }));
+  rows.sort((a, b) => b.b - a.b);
+  if (!rows.length) { sitesBox.innerHTML = ""; return; }
+  const top = rows.slice(0, 8);
+  const mx = top[0].b || 1;
+  sitesBox.innerHTML = '<div style="font-weight:700;font-size:13px;color:#7ddb8f;margin-bottom:6px">BIGGEST SITES</div>' +
+    top.map(r =>
+      '<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:4px">' +
+      '<div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + fsEsc(r.n) + '</div>' +
+      '<div style="width:90px;height:7px;background:#2a2f35;border-radius:4px;overflow:hidden"><div style="width:' + Math.round(r.b / mx * 100) + '%;height:100%;background:#2596ab"></div></div>' +
+      '<div style="width:64px;text-align:right;color:#999">' + fsMB(r.b) + '</div></div>').join("") +
+    (rows.length > 8 ? '<div style="font-size:11.5px;color:#777;margin-top:4px">+ ' + (rows.length - 8) + ' more</div>' : '');
+}
+
+document.getElementById("fsResStore").onclick = async () => {
+  document.getElementById("fsResModal").classList.remove("show");
+  document.getElementById("fsStoreModal").classList.add("show");
+  await fsStoreRender();
+  fsShrinkPreview();
+  fsShrinkEstimate();
+};
+document.getElementById("fsStoreClose").onclick = () => document.getElementById("fsStoreModal").classList.remove("show");
+document.getElementById("fsShrinkRun").onclick = () => fsShrinkAll();
+document.querySelectorAll('input[name="fsShrinkLvl"]').forEach(r => r.onchange = () => { fsShrinkPreview(); fsShrinkEstimate(); });
+
+
 /* ---------- Register-file menu (C16): one home for the file actions ---------- */
 document.getElementById("fsFileBtn").onclick = () => document.getElementById("fsFileModal").classList.add("show");
+document.getElementById("fsSaveBundleBtn").onclick = () => { document.getElementById("fsFileModal").classList.remove("show"); fsSaveAsFormat(true); };
+document.getElementById("fsSaveJsonBtn").onclick = () => { document.getElementById("fsFileModal").classList.remove("show"); fsSaveAsFormat(false); };
 document.getElementById("fsFileClose").onclick = () => document.getElementById("fsFileModal").classList.remove("show");
 (function fsFileMenuInit() {
   const slots = document.getElementById("fsFileSlots");
