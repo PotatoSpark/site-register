@@ -167,7 +167,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.19 (fs 1.17)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.20 (fs 1.18)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -6853,22 +6853,78 @@ async function fsGraph(path, opts) {
   return o.raw ? r : r.json();
 }
 async function fsMsMe() { return await fsGraph("/me"); }
-async function fsMsListBundles() {
-  const j = await fsGraph("/me/drive/root/search(q='.fsbundle')?$top=50&$select=id,name,size,lastModifiedDateTime,parentReference");
-  return (j.value || []).filter(f => /\.fsbundle$/i.test(f.name || ""));
+/* ---------- the workspace folder ----------
+   ONE fixed folder, ONE fixed filename. The moment "register-final-v2.fsbundle" becomes
+   possible the central model is gone - so the app owns the layout and nobody has to
+   decide where anything lives:
+
+     OneDrive/FireSpark/register.fsbundle    <- the central register
+     OneDrive/FireSpark/profile.fsprofile    <- the company profile (onboarding)
+     OneDrive/FireSpark/Archive/             <- one dated snapshot per day
+
+   In Stage 3 the same layout moves to a SharePoint document library and
+   register.fsbundle becomes the file that gets checked out. Layout does not change. */
+const FS_MS_DIR = "FireSpark";
+const FS_MS_ARCH = "Archive";
+const FS_MS_MAIN = "register.fsbundle";
+const FS_MS_PROF = "profile.fsprofile";
+const FS_MS_KEEP = 14;                 /* dated snapshots kept in Archive */
+const FS_MS_SEL = "?$select=id,name,size,eTag,cTag,lastModifiedDateTime,folder,file";
+
+function fsMsEnc(p) { return p.split("/").map(encodeURIComponent).join("/"); }
+function fsMsPath(rel) { return "/me/drive/root:/" + fsMsEnc(FS_MS_DIR + (rel ? "/" + rel : "")); }
+function fsMsIs404(e) { const s = String((e && e.message) || e); return /\b404\b/.test(s) || /itemNotFound/i.test(s); }
+function fsMsProg(msg) { const el = document.getElementById("fsMsProg"); if (el) el.textContent = msg; }
+
+/* metadata for a workspace-relative path; null when it simply isn't there yet */
+async function fsMsItem(rel) {
+  try { return await fsGraph(fsMsPath(rel) + FS_MS_SEL); }
+  catch (e) { if (fsMsIs404(e)) return null; throw e; }
 }
+async function fsMsChildren(rel) {
+  try {
+    const j = await fsGraph(fsMsPath(rel) + ":/children?$top=200&$select=id,name,size,lastModifiedDateTime");
+    return j.value || [];
+  } catch (e) { if (fsMsIs404(e)) return []; throw e; }
+}
+async function fsMsMkdir(parentRel, name, selfRel) {
+  const url = parentRel === null ? "/me/drive/root/children" : fsMsPath(parentRel) + ":/children";
+  try {
+    return await fsGraph(url, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name, folder: {}, "@microsoft.graph.conflictBehavior": "fail" })
+    });
+  } catch (e) {
+    if (/\b409\b/.test(String(e.message || e)) || /nameAlreadyExists/i.test(String(e.message || e))) return await fsMsItem(selfRel);
+    throw e;
+  }
+}
+/* creates FireSpark/ and FireSpark/Archive/ when missing. Safe to call every time. */
+async function fsMsEnsureWorkspace() {
+  let root = await fsMsItem("");
+  if (!root) root = await fsMsMkdir(null, FS_MS_DIR, "");
+  if (!(await fsMsItem(FS_MS_ARCH))) await fsMsMkdir("", FS_MS_ARCH, FS_MS_ARCH);
+  return root;
+}
+
 async function fsMsDownload(id) {
   const r = await fsGraph("/me/drive/items/" + encodeURIComponent(id) + "/content", { raw: true });
   return await r.arrayBuffer();
 }
-/* small files go straight up; anything bigger needs a chunked session */
-async function fsMsUpload(name, blob, folderPath) {
-  const dir = (folderPath || "FireSpark").replace(/^\/+|\/+$/g, "");
-  const target = "/me/drive/root:/" + dir.split("/").map(encodeURIComponent).join("/") + "/" + encodeURIComponent(name);
+
+/* target is {id} to overwrite a file IN PLACE - which is what makes Save write back to
+   the file you actually opened - or {rel}/{path} to create one. Small files go straight
+   up; anything bigger needs a chunked session. */
+async function fsMsPut(target, blob) {
+  const base = target.id
+    ? "/me/drive/items/" + encodeURIComponent(target.id)
+    : "/me/drive/root:/" + fsMsEnc(target.path || (FS_MS_DIR + "/" + target.rel));
+  const sep = target.id ? "/" : ":/";
   if (blob.size < 4 * 1024 * 1024) {
-    return await fsGraph(target + ":/content", { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: blob });
+    return await fsGraph(base + sep + "content", {
+      method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: blob });
   }
-  const sess = await fsGraph(target + ":/createUploadSession", {
+  const sess = await fsGraph(base + sep + "createUploadSession", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ item: { "@microsoft.graph.conflictBehavior": "replace" } })
   });
@@ -6876,19 +6932,113 @@ async function fsMsUpload(name, blob, folderPath) {
   let off = 0, last = null;
   while (off < blob.size) {
     const end = Math.min(off + CH, blob.size);
-    const part = blob.slice(off, end);
     const r = await fetch(sess.uploadUrl, {
       method: "PUT",
       headers: { "Content-Range": "bytes " + off + "-" + (end - 1) + "/" + blob.size },
-      body: part
+      body: blob.slice(off, end)
     });
     if (!r.ok && r.status !== 202) throw new Error("Upload failed at " + Math.round(off / 1048576) + " MB (" + r.status + ")");
     if (r.status !== 202) { last = await r.json(); }
     off = end;
-    const el = document.getElementById("fsMsProg");
-    if (el) el.textContent = "Uploading… " + Math.round(off / blob.size * 100) + "%";
+    fsMsProg("Uploading… " + Math.round(off / blob.size * 100) + "%");
   }
   return last;
+}
+async function fsMsUpload(name, blob, folderPath) {
+  const dir = (folderPath || FS_MS_DIR).replace(/^\/+|\/+$/g, "");
+  return await fsMsPut({ path: dir + "/" + name }, blob);
+}
+
+/* One snapshot a day, taken with the Graph copy action so it happens SERVER-SIDE:
+   a 32 MB register costs no upload at all. Never allowed to block a save. */
+async function fsMsArchive(item) {
+  try {
+    if (!item || !item.id) return;
+    const arch = await fsMsItem(FS_MS_ARCH);
+    if (!arch) return;
+    const day = new Date().toISOString().slice(0, 10);
+    const stem = String(item.name || FS_MS_MAIN).replace(/\.fsbundle$/i, "");
+    const name = stem + "-" + day + ".fsbundle";
+    const kids = await fsMsChildren(FS_MS_ARCH);
+    let added = 0;
+    if (!kids.some(k => k.name === name)) {                   /* one snapshot a day, no more */
+      await fsGraph("/me/drive/items/" + encodeURIComponent(item.id) + "/copy", {
+        method: "POST", raw: true, headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parentReference: { id: arch.id }, name: name })
+      });
+      added = 1;
+    }
+    /* prune EVERY time, not only on the days a new snapshot is taken - otherwise the
+       folder stops being trimmed the moment today's copy already exists */
+    const old = kids.filter(k => /\.fsbundle$/i.test(k.name || ""))
+      .sort((a, b) => String(b.name).localeCompare(String(a.name))).slice(FS_MS_KEEP - added);
+    for (const o of old) {
+      try { await fsGraph("/me/drive/items/" + encodeURIComponent(o.id), { method: "DELETE", raw: true }); } catch (e) {}
+    }
+  } catch (e) {}
+}
+
+async function fsMsRemember(item) {
+  try {
+    await idbPut("fsMsFile", {
+      id: item.id, name: item.name || FS_MS_MAIN, ctag: item.cTag || "",
+      path: FS_MS_DIR + "/" + (item.name || FS_MS_MAIN)
+    });
+  } catch (e) {}
+}
+async function fsMsOpenItem(item) {
+  fsMsProg("Downloading " + item.name + "…");
+  const buf = await fsMsDownload(item.id);
+  await fsLoadFromBuffer(buf);
+  await fsMsRemember(item);
+  fsRegFileHandle = null;
+  fsMsProg("");
+}
+
+/* The whole-drive search stays, but only as "somewhere else in your OneDrive", and
+   NEWEST FIRST - the old version handed back Microsoft's relevance order, which made
+   "is this the latest one?" unanswerable. */
+async function fsMsListBundles() {
+  const j = await fsGraph("/me/drive/root/search(q='.fsbundle')?$top=50&$select=id,name,size,lastModifiedDateTime,parentReference");
+  const out = (j.value || []).filter(f => /\.fsbundle$/i.test(f.name || ""));
+  out.sort((a, b) => String(b.lastModifiedDateTime || "").localeCompare(String(a.lastModifiedDateTime || "")));
+  return out;
+}
+
+/* Decide what the cloud should do on sign-in / when the panel opens.
+   "opened" | "current" | "none" | "dirty" | "other" */
+async function fsMsSync(quiet) {
+  await fsMsEnsureWorkspace();
+  const item = await fsMsItem(FS_MS_MAIN);
+  if (!item) { if (!fsProfile) await fsMsPickUpProfile(); return "none"; }
+  const prev = await idbGet("fsMsFile").catch(() => null);
+  const same = prev && prev.id === item.id;
+  if (fsRegister && !same) return "other";                    /* a different register is open - don't hijack it */
+  if (fsRegister && same && prev.ctag && prev.ctag === item.cTag) return "current";
+  if (fsRegister && fsDirty) return "dirty";
+  await fsMsOpenItem(item);
+  if (!quiet) alert("✓ Opened the central register — " + FS_MS_DIR + "/" + item.name);
+  return "opened";
+}
+/* A brand-new starter signs in to a OneDrive that has a profile but no register yet:
+   pick the profile up so the app is branded and configured before anything else. */
+async function fsMsPickUpProfile() {
+  try {
+    const p = await fsMsItem(FS_MS_PROF);
+    if (!p) return false;
+    const buf = await fsMsDownload(p.id);
+    return fsProfileFromFile(JSON.parse(new TextDecoder().decode(new Uint8Array(buf))));
+  } catch (e) { return false; }
+}
+async function fsMsPutProfile() {
+  if (!fsProfile) { alert("No company profile is loaded, so there's nothing to write."); return; }
+  try {
+    await fsMsEnsureWorkspace();
+    await fsMsPut({ rel: FS_MS_PROF }, new Blob([JSON.stringify(fsProfile)], { type: "application/json" }));
+    alert("✓ Profile written to " + FS_MS_DIR + "/" + FS_MS_PROF +
+      "\n\nAnyone signing in to this OneDrive picks it up automatically before they even have a register.");
+    fsMsListRender();
+  } catch (e) { alert("Couldn't write the profile: " + (e.message || e)); }
 }
 
 /* ---------- UI ---------- */
@@ -6921,70 +7071,102 @@ async function fsMsRender() {
   body.innerHTML = '<div id="fsMsProg" style="font-size:12.5px;color:#7ddb8f;margin-bottom:8px"></div>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">' +
     '<button class="btn" id="fsMsSave">&#128190; Save register to OneDrive</button>' +
-    '<button class="btn" id="fsMsRefresh">&#8635; List files</button>' +
+    '<button class="btn" id="fsMsRefresh">&#8635; Refresh</button>' +
+    '<button class="btn" id="fsMsProfPut" style="font-size:12.5px">Put profile in the folder</button>' +
     '<button class="btn" id="fsMsOut" style="color:#ff8a80">Sign out</button></div>' +
     '<div id="fsMsList" style="font-size:13px"></div>';
   document.getElementById("fsMsOut").onclick = async () => { await fsMsSignOut(); fsMsRender(); };
   document.getElementById("fsMsRefresh").onclick = () => fsMsListRender();
   document.getElementById("fsMsSave").onclick = () => fsMsSaveNow();
-  try { const me = await fsMsMe(); document.getElementById("fsMsName").textContent = "— " + (me.userPrincipalName || me.displayName || ""); } catch (e) {}
+  document.getElementById("fsMsProfPut").onclick = () => fsMsPutProfile();
+  try { const me = await fsMsMe(); const n = document.getElementById("fsMsName"); if (n) n.textContent = "— " + (me.userPrincipalName || me.displayName || ""); } catch (e) {}
+  try { await fsMsEnsureWorkspace(); } catch (e) {}
   fsMsListRender();
 }
 async function fsMsListRender() {
   const el = document.getElementById("fsMsList");
   if (!el) return;
   el.innerHTML = '<span style="color:#999">Looking…</span>';
-  let files = [];
-  try { files = await fsMsListBundles(); }
+  let files = [], central = null;
+  try { central = await fsMsItem(FS_MS_MAIN); files = await fsMsListBundles(); }
   catch (e) { el.innerHTML = '<span style="color:#ff8a80">' + fsEsc(e.message || String(e)) + '</span>'; return; }
-  if (!files.length) { el.innerHTML = '<span style="color:#999">No .fsbundle files found in your OneDrive yet — use Save above to put one there.</span>'; return; }
-  el.innerHTML = files.map((f, i) =>
-    '<div style="display:flex;gap:8px;align-items:center;border-top:1px solid #33383f;padding:7px 0">' +
+  const isArch = f => /\/Archive$/i.test(String((f.parentReference && f.parentReference.path) || ""));
+  const nArch = files.filter(isArch).length;
+  const others = files.filter(f => !isArch(f) && !(central && f.id === central.id));
+  const row = (f, cls, i) =>
+    '<div style="display:flex;gap:8px;align-items:center;padding:6px 0">' +
     '<div style="flex:1;min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + fsEsc(f.name) + '</div>' +
     '<div style="font-size:11px;color:#777">' + (f.size ? (f.size / 1048576).toFixed(1) + ' MB · ' : '') +
-    fsEsc((f.lastModifiedDateTime || "").slice(0, 10)) + '</div></div>' +
-    '<button class="btn fsMsOpen" data-i="' + i + '">Open</button></div>').join("");
-  el.querySelectorAll(".fsMsOpen").forEach(b => b.onclick = async () => {
-    const f = files[+b.dataset.i];
+    fsEsc(String(f.lastModifiedDateTime || "").slice(0, 10)) +
+    (f.parentReference && f.parentReference.path ? ' · ' + fsEsc(String(f.parentReference.path).replace(/^\/drive\/root:\/?/, "") || "OneDrive") : '') +
+    '</div></div><button class="btn ' + cls + '" data-i="' + i + '">Open</button></div>';
+  let h = '<div style="border-top:1px solid #33383f;padding:8px 0">' +
+    '<div style="font-size:11px;color:#7ddb8f;letter-spacing:.05em">CENTRAL REGISTER — ' + fsEsc(FS_MS_DIR + "/" + FS_MS_MAIN) + '</div>';
+  h += central ? row(central, "fsMsOpenC", 0)
+    : '<div style="font-size:12.5px;color:#999;margin-top:5px">Not created yet — press <b>Save register to OneDrive</b> and it appears here.</div>';
+  h += '</div>';
+  if (others.length) {
+    h += '<div style="border-top:1px solid #33383f;padding:8px 0 0"><div style="font-size:11px;color:#888;letter-spacing:.05em">ELSEWHERE IN YOUR ONEDRIVE — NEWEST FIRST</div>' +
+      others.map((f, i) => row(f, "fsMsOpen", i)).join("") + '</div>';
+  }
+  if (nArch) h += '<div style="border-top:1px solid #33383f;padding:7px 0;font-size:11.5px;color:#777">' +
+    nArch + ' snapshot' + (nArch === 1 ? '' : 's') + ' in ' + fsEsc(FS_MS_DIR + "/" + FS_MS_ARCH) +
+    ' — one a day, oldest pruned past ' + FS_MS_KEEP + '.</div>';
+  el.innerHTML = h;
+  const openIt = async (f) => {
     if (fsDirty && !confirm("You have UNSAVED changes — opening this replaces them. Continue?")) return;
-    const prog = document.getElementById("fsMsProg");
-    if (prog) prog.textContent = "Downloading " + f.name + "…";
     try {
-      const buf = await fsMsDownload(f.id);
-      await fsLoadFromBuffer(buf);
-      await idbPut("fsMsFile", { id: f.id, name: f.name });
-      fsRegFileHandle = null;
-      if (prog) prog.textContent = "";
+      await fsMsOpenItem(f);
       document.getElementById("fsMsModal").classList.remove("show");
-      alert("✓ Opened " + f.name + " from OneDrive.\n\nSave register will write straight back to it.");
-    } catch (e) {
-      if (prog) prog.textContent = "";
-      alert("Couldn't open that file: " + (e.message || e));
-    }
-  });
+      alert("✓ Opened " + f.name + " from OneDrive.\n\nSave now writes straight back to this file.");
+    } catch (e) { fsMsProg(""); alert("Couldn't open that file: " + (e.message || e)); }
+  };
+  el.querySelectorAll(".fsMsOpenC").forEach(b => b.onclick = () => openIt(central));
+  el.querySelectorAll(".fsMsOpen").forEach(b => b.onclick = () => openIt(others[+b.dataset.i]));
 }
 async function fsMsSaveNow() {
   if (!fsRegister) { alert("No register is open."); return; }
-  const prog = document.getElementById("fsMsProg");
   let who = "";
   try { who = localStorage.getItem("fs-user") || ""; } catch (e) {}
-  fsRegister.updated = new Date().toISOString().slice(0, 10);
-  if (who) fsRegister.savedBy = who;
-  const prev = await idbGet("fsMsFile").catch(() => null);
-  const name = (prev && prev.name) || ("firespark-register-" + fsRegister.updated + ".fsbundle");
   try {
-    if (prog) prog.textContent = "Packing…";
+    fsMsProg("Checking the cloud copy…");
+    await fsMsEnsureWorkspace();
+    const prev = await idbGet("fsMsFile").catch(() => null);
+    /* Where does this save go? Back to the file we OPENED if it still exists, otherwise
+       the central register, otherwise create the central register. The old code always
+       wrote a fresh copy into FireSpark/ - so opening from anywhere else and saving
+       silently produced two files with the same name that then drifted apart. */
+    let item = null;
+    if (prev && prev.id) {
+      try { item = await fsGraph("/me/drive/items/" + encodeURIComponent(prev.id) + FS_MS_SEL); }
+      catch (e) { if (!fsMsIs404(e)) throw e; }
+    }
+    if (!item) item = await fsMsItem(FS_MS_MAIN);
+    /* cTag changes only when the CONTENT changes, so this is a real "someone else saved"
+       test rather than a metadata false alarm. */
+    if (item && prev && prev.id === item.id && prev.ctag && item.cTag && prev.ctag !== item.cTag) {
+      fsMsProg("");
+      if (!confirm("The cloud copy of " + item.name + " has CHANGED since you opened it.\n\n" +
+        "Someone else saved over it, or you saved from another device. Saving now replaces their version.\n\n" +
+        "Continue and overwrite?")) return;
+    }
+    if (item) { fsMsProg("Archiving the previous version…"); await fsMsArchive(item); }
+    fsRegister.updated = new Date().toISOString().slice(0, 10);
+    if (who) fsRegister.savedBy = who;
+    fsMsProg("Packing…");
     const blob = await fsBuildBundle(fsRegister);
-    if (prog) prog.textContent = "Uploading " + (blob.size / 1048576).toFixed(1) + " MB…";
-    const r = await fsMsUpload(name, blob, "FireSpark");
-    if (r && r.id) await idbPut("fsMsFile", { id: r.id, name: name });
+    fsMsProg("Uploading " + (blob.size / 1048576).toFixed(1) + " MB…");
+    const r = await fsMsPut(item ? { id: item.id } : { rel: FS_MS_MAIN }, blob);
+    let saved = (r && r.id) ? r : null;
+    if (!saved || !saved.cTag) { try { saved = (await fsMsItem(FS_MS_MAIN)) || saved; } catch (e) {} }
+    if (saved && saved.id) await fsMsRemember(saved);
     fsDirty = false; fsBundleMode = true; fsStamp();
-    if (prog) prog.textContent = "";
+    fsMsProg("");
     await fsBackupSnapshot("saved to OneDrive");
-    alert("✓ Saved to OneDrive → FireSpark/" + name);
+    alert("✓ Saved to OneDrive — " + FS_MS_DIR + "/" + ((saved && saved.name) || (item && item.name) || FS_MS_MAIN));
     fsMsListRender();
   } catch (e) {
-    if (prog) prog.textContent = "";
+    fsMsProg("");
     alert("Couldn't save to OneDrive: " + (e.message || e) + "\n\nYour work is still on this device — try again, or use Save register to write a local file.");
   }
 }
@@ -11215,7 +11397,8 @@ document.getElementById("fsPlannerBtn").onclick = async () => {
 
 (async () => {
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
-  try { await fsMsHandleRedirect(); } catch (e) {}
+  let fsMsFresh = false;
+  try { fsMsFresh = await fsMsHandleRedirect(); } catch (e) {}
   try {
     const cached = await fsReadReg();
     if (cached && cached.clients) {
@@ -11227,6 +11410,16 @@ document.getElementById("fsPlannerBtn").onclick = async () => {
     }
   } catch (e) {}
   fsLoadProfile();
+  /* Cloud pickup. Quiet unless the user has just come back from a sign-in, and it never
+     touches a register that is already open and unsaved. */
+  try {
+    if (await fsMsSignedIn()) {
+      const r = await fsMsSync(!fsMsFresh);
+      if (fsMsFresh && r === "none") alert("Signed in \u2713\n\nThere's no central register in OneDrive yet. " +
+        FS_MS_DIR + "/ is ready \u2014 press Save register to OneDrive to create it.");
+      else if (fsMsFresh && r === "dirty") alert("Signed in \u2713\n\nThe OneDrive copy is newer, but you have UNSAVED changes on this device, so nothing was replaced. Save or export first, then reopen from OneDrive.");
+    }
+  } catch (e) {}
 })();
 
 
