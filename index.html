@@ -6747,7 +6747,7 @@ async function fsSaveAsFormat(asBundle) {
    Nothing here changes WHERE the register lives for anyone already using a local file.
    Cloud is an extra way in, never a replacement, and the app must keep working from its
    local copy when there is no signal - that is the whole point of the thing. ========== */
-const FS_MS_CLIENT_DEFAULT = "";                 /* filled in once the app registration exists */
+const FS_MS_CLIENT_DEFAULT = "b317b080-d0b1-4771-8a2f-93104cfd16a8";   /* public identifier - SPAs have no secret; the redirect-URI whitelist is the protection */
 const FS_MS_SCOPES = "Files.ReadWrite offline_access User.Read openid profile";
 const FS_MS_AUTH = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
 const FS_MS_TOKEN = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
