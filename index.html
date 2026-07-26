@@ -167,7 +167,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.16 (fs 1.14)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.17 (fs 1.15)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -657,6 +657,8 @@
     <h3 style="margin-bottom:4px">&#128193; Register file</h3>
     <div style="font-size:12px;color:#999;margin-bottom:10px">One file holds everything &mdash; clients, sites, plans, tests and photos. Save after changes; share via OneDrive. Backups live in &#9881; Settings.</div>
     <div id="fsFileSlots" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
+    <button class="btn" id="fsCloseRegBtn" style="width:100%;text-align:left">&#10005; Close register &mdash; back to the start screen</button>
+    <button class="btn" id="fsWipeRegBtn" style="width:100%;text-align:left;color:#ff8a80">&#128465; Remove this register from this device&hellip;</button>
     <button class="btn" id="fsSaveBundleBtn" style="width:100%;text-align:left">&#128230; Save as .fsbundle &mdash; smaller, new format&hellip;</button>
     <button class="btn" id="fsSaveJsonBtn" style="width:100%;text-align:left">&#128196; Save as single .json &mdash; old format&hellip;</button>
     <button class="btn" id="fsExpClientBtn" style="width:100%;text-align:left">&#128100; Export ONE client as its own register&hellip;</button>
@@ -6337,6 +6339,10 @@ async function fsLoadProfile() {
   fsApplyProfile();
 }
 function fsProfileFromFile(obj) {
+  if (obj && (obj.app === "firespark-register" || obj.app === "firespark-bundle" || obj.clients)) {
+    alert("That's a REGISTER file, not a company profile.\n\nLoad it with \ud83d\udcc2 Load / replace register file instead.\n\n(The company profile is stored inside the register anyway, so it usually doesn't need loading separately.)");
+    return false;
+  }
   if (!obj || obj.app !== "firespark-profile" || !obj.company) { alert("That doesn't look like a FireSpark company profile file."); return false; }
   fsProfile = obj;
   idbPut("fsProfile", obj).catch(() => {});
@@ -6717,6 +6723,39 @@ async function fsSaveAsFormat(asBundle) {
         ".\n\nOpen that new file with 📂 Load next time so Save writes straight back to it." +
         (asBundle ? "\n\nColleagues need this version of the app (or newer) to open a .fsbundle." : ""));
   fsBackupSnapshot("saved");
+}
+
+/* close the register in the app but leave it cached, so reopening is instant */
+function fsCloseRegister() {
+  fsRegister = null; fsClient = null; fsSite = null; fsParentSite = null;
+  try { fsSiteCtx = null; } catch (e) {}
+  fsRegFileHandle = null; fsDirty = false; fsBundleMode = false;
+  try { fsStamp(); } catch (e) {}
+  ["fsClientList", "fsSiteList"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+  fsShow("fsClientsView");
+}
+/* wipe every trace of the register from THIS device - the shared-iPad case */
+async function fsWipeRegister() {
+  if (fsDirty) {
+    alert("You have UNSAVED changes.\n\nSave the register to a file first — this would delete the only copy of that work.");
+    return;
+  }
+  if (!confirm("Remove this register from THIS DEVICE?\n\nDeletes the cached register, every photo, every block plan, the backups and the autosaves held here.\n\nYour saved register FILE is not touched — you can load it again any time. But if you have not saved it to a file, the work is gone.")) return;
+  if (!confirm("Last check — delete all register data on this device?")) return;
+  document.getElementById("fsFileModal").classList.remove("show");
+  let n = 0;
+  try {
+    for (const k of await fsStoreKeys()) {
+      const ks = String(k);
+      if (ks === "fsIdx" || ks === "fsRegister" || ks === "fsRegBackups" ||
+          ks.indexOf("fsBlob:") === 0 || ks.indexOf("fsPlan:") === 0 || ks.indexOf("autosave") === 0) {
+        await idbDel(k); n++;
+      }
+    }
+  } catch (e) {}
+  fsBlobHave = null; fsBlobHashes = new Map();
+  fsCloseRegister();
+  alert("\u2713 Removed from this device (" + n + " items).\n\nThe company profile and any library files are still here. Load a register file to start again.");
 }
 
 /* drop images no longer referenced by the register or any kept backup */
@@ -9208,6 +9247,13 @@ document.querySelectorAll('input[name="fsShrinkLvl"]').forEach(r => r.onchange =
 
 /* ---------- Register-file menu (C16): one home for the file actions ---------- */
 document.getElementById("fsFileBtn").onclick = () => document.getElementById("fsFileModal").classList.add("show");
+document.getElementById("fsCloseRegBtn").onclick = () => {
+  if (!fsRegister) { alert("No register is open."); return; }
+  if (fsDirty && !confirm("You have UNSAVED changes.\n\nClose anyway? The register stays on this device, so reopening it brings everything back — but anything not saved to the FILE is only here.")) return;
+  document.getElementById("fsFileModal").classList.remove("show");
+  fsCloseRegister();
+};
+document.getElementById("fsWipeRegBtn").onclick = () => fsWipeRegister();
 document.getElementById("fsSaveBundleBtn").onclick = () => { document.getElementById("fsFileModal").classList.remove("show"); fsSaveAsFormat(true); };
 document.getElementById("fsSaveJsonBtn").onclick = () => { document.getElementById("fsFileModal").classList.remove("show"); fsSaveAsFormat(false); };
 document.getElementById("fsFileClose").onclick = () => document.getElementById("fsFileModal").classList.remove("show");
@@ -10033,7 +10079,7 @@ function fsPlHavMin(a, b) {  // fallback: haversine km x 1.35 road factor at 65 
 function fsPlTravel(aGeo, aId, bGeo, bId) {  // driving minutes a->b: matrix first, estimate second
   // 5-min floor between DIFFERENT sites: park, walk in, pack up - stops days packing unrealistically
   const tv = fsRegister && fsRegister.travel;
-  if (tv && tv.ids) {
+  if (tv && Array.isArray(tv.ids) && Array.isArray(tv.mins)) {
     const i = tv.ids.indexOf(aId), j = tv.ids.indexOf(bId);
     if (i >= 0 && j >= 0 && tv.mins[i] && tv.mins[i][j] != null) return { min: Math.max(5, tv.mins[i][j]), est: false };
   }
@@ -10616,7 +10662,7 @@ function fsPlRender() {
   const withA = fsPlSites().filter(e => (e.s.address || "").trim());
   const unlocated = withA.filter(e => !e.s.geo).map(e => e.s.name);
   let tvNote = "Located " + (withA.length - unlocated.length) + " of " + withA.length + " sites · " +
-    (fsRegister.travel ? "travel times (" + fsRegister.travel.ids.length + " sites) updated " + (fsRegister.travel.updated || "").slice(0, 10) : "no travel times yet - Plan month fetches them (needs internet once)");
+    ((fsRegister.travel && Array.isArray(fsRegister.travel.ids)) ? "travel times (" + fsRegister.travel.ids.length + " sites) updated " + (fsRegister.travel.updated || "").slice(0, 10) : "no travel times yet - Plan month fetches them (needs internet once)");
   if (unlocated.length) tvNote += '<br><span style="color:#c62828">Not located (fix the address, then ⟳ Update travel times in ⚙): ' + unlocated.map(fsEsc).join(", ") + '</span>';
 
   let html = '<div style="margin-bottom:12px"><a id="fsPlBack" class="fsCrumb">&#8592; Clients</a></div>';
@@ -11544,7 +11590,25 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
 
 /* ---------- modules ---------- */
 function fsModules() { return (fsProfile && fsProfile.modules && typeof fsProfile.modules === "object") ? fsProfile.modules : null; }
+/* ---------- entitlement layer (grants) ----------
+   Two levels now, deliberately separate:
+     grants  - what the client was ISSUED. Set in the builder only. Not granted = INVISIBLE.
+     modules - what is currently ON. The client may change this in their own editor,
+               but only for things that were granted.
+   A profile with no "grants" block means everything is granted, so profiles issued
+   before this change behave exactly as they did. */
+function fsGrants() { return (fsProfile && fsProfile.grants && typeof fsProfile.grants === "object") ? fsProfile.grants : null; }
+function fsGranted(path) {
+  const g = fsGrants(); if (!g) return true;
+  let cur = g;
+  for (const k of path.split(".")) {
+    if (cur == null || typeof cur !== "object" || !(k in cur)) return true;   /* unspecified = granted */
+    cur = cur[k];
+  }
+  return cur !== false;
+}
 function fsModOn(path) {
+  if (!fsGranted(path)) return false;          /* never issued - hidden, not merely off */
   const m = fsModules(); if (!m) return true;
   let cur = m;
   for (const k of path.split(".")) {
@@ -11578,6 +11642,93 @@ function fsApplyModules() {
     }
   } catch (e) {}
 }
+
+
+/* ================= Client profile editor =================
+   The CUSTOMER's own switches. Shows only what was granted; anything ungranted is
+   not listed at all. Saves into register.profile, so it is a company-wide setting
+   that travels with the register file rather than a per-device preference.
+   Reached from the dashboard, which is already behind the admin passcode. */
+function fsEditorModalEl() {
+  let m = document.getElementById("fsEditorModal");
+  if (m) return m;
+  m = document.createElement("div");
+  m.className = "modal"; m.id = "fsEditorModal"; m.style.zIndex = "121";
+  m.innerHTML = '<div class="modalbox" style="max-width:520px;width:95vw;max-height:86vh;overflow-y:auto;text-align:left"><div id="fsEdBody"></div></div>';
+  document.body.appendChild(m);
+  return m;
+}
+function fsEditorOpen() {
+  fsEditorModalEl().classList.add("show");
+  fsEditorRender();
+}
+function fsEditorRender() {
+  const body = document.getElementById("fsEdBody");
+  const co = (fsProfile && fsProfile.company && fsProfile.company.name) || "";
+  let h = '<h3 style="margin-bottom:4px">&#127918; Features</h3>';
+  h += '<div style="font-size:12px;color:#999;margin-bottom:12px">Turn parts of the app on or off for ' +
+       (co ? fsEsc(co) : "your company") + '. This is saved into the register file, so it applies to everyone using it. ' +
+       'Only what you have been given appears here.</div>';
+  let any = false;
+  fsBldGroups().forEach(([title, gk, items]) => {
+    const rows = items.filter(([k]) => fsGranted((gk ? gk + "." : "") + k));
+    if (!rows.length) return;
+    any = true;
+    h += '<div style="font-weight:700;font-size:12.5px;color:#7ddb8f;margin:12px 0 5px">' + fsEsc(title.toUpperCase()) + '</div>';
+    h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:5px">';
+    rows.forEach(([k, lbl]) => {
+      const path = (gk ? gk + "." : "") + k;
+      h += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">' +
+           '<input type="checkbox" data-edmod="' + path + '"' + (fsModOn(path) ? " checked" : "") + '> ' + fsEsc(lbl) + '</label>';
+    });
+    h += '</div>';
+  });
+  if (!any) h += '<div style="font-size:13px;color:#999">No optional features have been enabled for this profile.</div>';
+  h += '<div class="row" style="margin-top:16px;gap:8px"><button class="btn" id="fsEdClose">Close</button></div>';
+  body.innerHTML = h;
+  body.querySelectorAll("[data-edmod]").forEach(cb => cb.onchange = () => {
+    if (!fsProfile) { alert("No company profile is loaded, so there is nothing to change."); fsEditorRender(); return; }
+    const path = cb.dataset.edmod, on = cb.checked;
+    fsProfile.modules = fsProfile.modules || {};
+    const parts = path.split(".");
+    if (parts.length === 1) fsProfile.modules[parts[0]] = on;
+    else {
+      if (typeof fsProfile.modules[parts[0]] !== "object" || fsProfile.modules[parts[0]] === null) fsProfile.modules[parts[0]] = {};
+      fsProfile.modules[parts[0]][parts[1]] = on;
+    }
+    idbPut("fsProfile", fsProfile).catch(() => {});
+    if (fsRegister) { fsRegister.profile = fsProfile; fsMarkDirty(); }   /* company-wide: rides in the register */
+    fsApplyModules();
+  });
+  document.getElementById("fsEdClose").onclick = () => document.getElementById("fsEditorModal").classList.remove("show");
+}
+
+/* ================= SparkCommand - VENDOR ONLY =========================================
+   TEMPORARY HOME for the profile builder. When the standalone admin app exists, delete
+   the button injected in fsDashRender below and lift this whole block out. The client
+   editor above stays where it is and the profile file format does not change.
+   The passcode is set by the vendor on first use and hashed into this device's storage
+   only - nothing secret ships in the (public) repo. ===================================== */
+async function fsSparkGate() {
+  let stored = "";
+  try { stored = localStorage.getItem("fs-spark-pin") || ""; } catch (e) {}
+  if (!stored) {
+    if (!confirm("SparkCommand is the profile builder — the vendor-side tool.\n\nNo passcode is set on this device yet. Set one now?")) return false;
+    const p1 = prompt("Choose a SparkCommand passphrase (8+ characters — this device only):") || "";
+    if (p1.length < 8) { if (p1) alert("Too short — use at least 8 characters. Nothing was set."); return false; }
+    const p2 = prompt("Re-enter it:") || "";
+    if (p1 !== p2) { alert("They didn't match — nothing was set."); return false; }
+    try { localStorage.setItem("fs-spark-pin", await fsSha256(p1)); } catch (e) {}
+    alert("Passcode set ✓ — it is stored on this device only. You'll need to set it again on any other device you build profiles from.");
+    return true;
+  }
+  const p = prompt("SparkCommand passphrase:");
+  if (p === null) return false;
+  if ((await fsSha256(p)) !== stored) { alert("Wrong passphrase."); return false; }
+  return true;
+}
+async function fsSparkOpen() { if (await fsSparkGate()) fsBuilderOpen(); }
+/* ================= end SparkCommand block ============================================= */
 
 /* ---------- access gate (client-side trial gate — NOT licensing; bypassable by design) ---------- */
 function fsAccess() { return (fsProfile && fsProfile.access && typeof fsProfile.access === "object" && fsProfile.access.mode) ? fsProfile.access : null; }
@@ -12001,7 +12152,9 @@ let fsBld = null;
 function fsBldDefault() {
   const m = {};
   fsBldGroups().forEach(([, gk, items]) => items.forEach(([k]) => { m[(gk ? gk + "." : "") + k] = true; }));
-  return { name: "", modules: m, access: { mode: "none", start: "", expiry: "", user: "", pass: "", passHash: "", contact: "" }, incl: true };
+  const g = {};
+  fsBldGroups().forEach(([, gk, items]) => items.forEach(([k]) => { g[(gk ? gk + "." : "") + k] = true; }));
+  return { name: "", modules: m, grants: g, access: { mode: "none", start: "", expiry: "", user: "", pass: "", passHash: "", contact: "" }, incl: true };
 }
 const FS_BLD_PRESETS = {
   full: () => {},
@@ -12040,7 +12193,11 @@ function fsBuilderRender() {
     h += '<div style="font-size:12px;font-weight:700;color:#7ddb8f;margin:10px 0 5px">' + title.toUpperCase() + '</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 10px">';
     items.forEach(([k, lbl]) => {
       const path = (gk ? gk + "." : "") + k;
-      h += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="checkbox" data-bldmod="' + path + '"' + (st.modules[path] !== false ? " checked" : "") + '> ' + fsEsc(lbl) + '</label>';
+      const gOn = st.grants ? st.grants[path] !== false : true;
+      h += '<div style="display:flex;align-items:center;gap:5px;font-size:12.5px">' +
+           '<label title="Give this to the client at all. Unticked = they never see it." style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" data-bldgrant="' + path + '"' + (gOn ? " checked" : "") + '><span style="color:#7ddb8f">give</span></label>' +
+           '<label title="On by default. They can change this in their own editor." style="display:flex;align-items:center;gap:4px;cursor:pointer;' + (gOn ? '' : 'opacity:.35;pointer-events:none') + '"><input type="checkbox" data-bldmod="' + path + '"' + (st.modules[path] !== false ? " checked" : "") + '><span style="color:#888">on</span></label>' +
+           '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + fsEsc(lbl) + '</span></div>';
     });
     h += '</div>';
   });
@@ -12064,6 +12221,11 @@ function fsBuilderRender() {
   body.innerHTML = h;
 
   /* wiring */
+  body.querySelectorAll("[data-bldgrant]").forEach(cb => cb.onchange = () => {
+    st.grants = st.grants || {};
+    st.grants[cb.dataset.bldgrant] = cb.checked;
+    fsBuilderRender();
+  });
   body.querySelectorAll("[data-bldpre]").forEach(b => b.onclick = () => {
     fsBld = fsBldDefault();
     fsBld.name = document.getElementById("fsBldName").value;
@@ -12133,7 +12295,16 @@ function fsBuilderRender() {
     });
     const src = st._src || {};
     const base = st.incl && fsProfile ? fsProfile : (st.incl ? src : {});
-    const out = { app: "firespark-profile", version: 2, created: new Date().toISOString().slice(0, 10), company: { name: name }, modules: modules };
+    const grants = {};
+    Object.entries(st.grants || {}).forEach(([path, v]) => {
+      const parts = path.split(".");
+      if (parts.length === 1) grants[parts[0]] = !!v;
+      else { grants[parts[0]] = grants[parts[0]] || {}; grants[parts[0]][parts[1]] = !!v; }
+    });
+    if (!st.incl && fsProfile && ((fsProfile.checklists && fsProfile.checklists.modes) || (fsProfile.equipment || []).length)) {
+      if (!confirm("WARNING — the equipment fields and test checklists box is UNTICKED.\n\nThe exported profile will contain NO equipment fields and NO checklists. Anyone loading it loses them.\n\nExport anyway?")) return;
+    }
+    const out = { app: "firespark-profile", version: 2, created: new Date().toISOString().slice(0, 10), company: { name: name }, modules: modules, grants: grants };
     if (base.equipment && base.equipment.length) out.equipment = base.equipment;
     if (base.equipmentItems && base.equipmentItems.length) out.equipmentItems = base.equipmentItems;
     if (base.checklists && base.checklists.modes) out.checklists = base.checklists;
@@ -12157,11 +12328,22 @@ try {
     try {
       const wrap = document.getElementById("fsDashView");
       if (!wrap || document.getElementById("fsBuilderBtn")) return;
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px";
+      const ed = document.createElement("button");
+      ed.className = "fsbtn"; ed.id = "fsEditorBtn";
+      ed.innerHTML = "&#127918; Features";
+      ed.title = "Turn parts of the app on or off for your company";
+      ed.onclick = fsEditorOpen;
+      row.appendChild(ed);
+      /* SparkCommand: VENDOR ONLY, temporary. Remove this button when the admin app exists. */
       const b = document.createElement("button");
-      b.className = "fsbtn"; b.id = "fsBuilderBtn"; b.style.cssText = "margin:0 0 12px";
-      b.innerHTML = "&#128736; Client profile builder";
-      b.onclick = fsBuilderOpen;
-      wrap.insertBefore(b, wrap.children[1] || null);
+      b.className = "fsbtn"; b.id = "fsBuilderBtn";
+      b.innerHTML = "&#9889; SparkCommand";
+      b.title = "Profile builder (vendor)";
+      b.onclick = fsSparkOpen;
+      row.appendChild(b);
+      wrap.insertBefore(row, wrap.children[1] || null);
     } catch (e) {}
   };
 } catch (e) {}
