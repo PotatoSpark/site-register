@@ -132,6 +132,10 @@
   #chestHandle:active { background:#3a2b27; }
   body.focusmode #chestHandle { display:none !important; }
 </style>
+<style>
+.fsFileGrp{font-size:11px;letter-spacing:.05em;color:#7ddb8f;font-weight:700;margin:12px 0 5px}
+.fsFileNote{font-size:11.5px;color:#8b949b;margin:5px 0 2px;line-height:1.35}
+</style>
 </head>
 <body>
 <style>
@@ -167,7 +171,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.20 (fs 1.18)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.21 (fs 1.19)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -177,7 +181,7 @@
       <button class="fsbtn" id="fsSettingsBtn" title="Settings">&#9881;</button>
       <button class="fsbtn" id="fsPlannerBtn" style="display:none" title="Monthly planner + day routes">&#128197; Planner</button>
       <button class="fsbtn" id="fsDashBtn" style="display:none" title="All-sites overview (admin passcode)">&#128202; Dashboard</button>
-      <button class="fsbtn" id="fsExportReg" style="display:none">&#128190; Export register</button>
+      <button class="fsbtn" id="fsExportReg" style="display:none">&#128190; Download a copy</button>
     </div>
     <div id="fsRegStamp" style="font-size:11.5px;color:#7c8a91;margin-bottom:16px"></div>
 
@@ -657,12 +661,21 @@
     <h3 style="margin-bottom:4px">&#128193; Register file</h3>
     <div style="font-size:12px;color:#999;margin-bottom:10px">One file holds everything &mdash; clients, sites, plans, tests and photos. Save after changes; share via OneDrive. Backups live in &#9881; Settings.</div>
     <div id="fsFileSlots" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
-    <button class="btn" id="fsMsBtn" style="width:100%;text-align:left">&#9729; Microsoft OneDrive &mdash; open / save in your own account&hellip;</button>
-    <button class="btn" id="fsCloseRegBtn" style="width:100%;text-align:left">&#10005; Close register &mdash; back to the start screen</button>
-    <button class="btn" id="fsWipeRegBtn" style="width:100%;text-align:left;color:#ff8a80">&#128465; Remove this register from this device&hellip;</button>
-    <button class="btn" id="fsSaveBundleBtn" style="width:100%;text-align:left">&#128230; Save as .fsbundle &mdash; smaller, new format&hellip;</button>
-    <button class="btn" id="fsSaveJsonBtn" style="width:100%;text-align:left">&#128196; Save as single .json &mdash; old format&hellip;</button>
-    <button class="btn" id="fsExpClientBtn" style="width:100%;text-align:left">&#128100; Export ONE client as its own register&hellip;</button>
+    <div class="fsFileGrp">WHERE THIS REGISTER LIVES</div>
+    <button class="btn" id="fsMsBtn" style="width:100%;text-align:left;background:#0e7c8c;border-color:#0e7c8c;color:#fff;font-weight:700">&#9729; Microsoft OneDrive &mdash; open / save the central register&hellip;</button>
+    <div class="fsFileNote">The one shared copy. Everyone opens and saves the same file.</div>
+    <div class="fsFileGrp">KEEP A COPY</div>
+    <button class="btn" id="fsSaveBundleBtn" style="width:100%;text-align:left">&#128230; Save a copy to this device (.fsbundle)&hellip;</button>
+    <button class="btn" id="fsExpClientBtn" style="width:100%;text-align:left">&#128100; Copy of ONE client only&hellip;</button>
+    <div class="fsFileNote">Copies do not sync back. Use them for working with no internet, or to hand a colleague a file.</div>
+    <details style="margin-top:10px">
+      <summary style="cursor:pointer;font-size:12px;color:#9aa;padding:4px 0">Advanced &amp; older formats</summary>
+      <div style="padding-top:6px">
+        <button class="btn" id="fsSaveJsonBtn" style="width:100%;text-align:left">&#128196; Save as single .json &mdash; old format&hellip;</button>
+        <button class="btn" id="fsCloseRegBtn" style="width:100%;text-align:left">&#10005; Close register &mdash; back to the start screen</button>
+        <button class="btn" id="fsWipeRegBtn" style="width:100%;text-align:left;color:#ff8a80">&#128465; Remove this register from this device&hellip;</button>
+      </div>
+    </details>
     <div class="row" style="margin-top:14px"><button class="btn" id="fsFileClose">Close</button></div>
   </div>
 </div>
@@ -6313,6 +6326,74 @@ const FS_EQUIP_FIELDS = [
   "Exit lights", "Emergency lights", "Gas suppression", "Other equipment"
 ];
 
+/* ===== Equipment libraries by discipline =====================================
+   A library is a named set of equipment FIELDS, some flagged typed-quantity.
+   The builder ticks which libraries a profile gets; overlapping field NAMES
+   collapse to one row. Fire is his current field list VERBATIM - same strings,
+   same order, same qty flags - so no existing site data can orphan. */
+const FS_EQUIP_LIBS = [
+  { key:"fire", label:"Fire",
+    fields:["Panel location","Panel type","Panel battery type / size","Panel instructions","Detectors",
+      "EWIS location","EWIS type","OWS / speaker notes","Fire extinguisher locations","Fire extinguisher",
+      "Fire doors","Hose reel locations","Hydrant / booster location","Pump room location","Sprinkler valve room",
+      "Exit lights","Emergency lights","Gas suppression","Other equipment"],
+    items:["Fire extinguisher","Detectors","Exit lights","Emergency lights","OWS / speaker notes","Hose reel locations","Fire doors"] },
+  { key:"electrical", label:"Electrical",
+    fields:["Main switchboard location","Main switch / isolation point","Distribution board locations","Distribution boards",
+      "RCD test points","Switchboard schedule / drawings","Test & tag (portable appliances)","Exit lights","Emergency lights",
+      "Emergency light battery type","Metering / CT chamber","Earthing / MEN link location","Solar / inverter location",
+      "Generator location","UPS location","Hazardous area equipment","Other equipment"],
+    items:["Distribution boards","RCD test points","Test & tag (portable appliances)","Exit lights","Emergency lights"] },
+  { key:"firstaid", label:"First aid",
+    fields:["First aid kit locations","First aid kits","Kit type / template","AED locations","AEDs","AED pad expiry",
+      "AED battery expiry","Eyewash station locations","Eyewash stations","Emergency shower locations","Burns kit",
+      "Snake bite kit","Spill kit","First aid room location","Other equipment"],
+    items:["First aid kits","AEDs","Eyewash stations"] },
+  { key:"grounds", label:"Grounds & property maintenance",
+    fields:["Lawn areas / sections","Approx mowing area","Garden bed locations","Hedges","Trees requiring attention",
+      "Irrigation controller location","Irrigation zones","Tap / water points","Green waste location",
+      "Gate codes / access points","No-spray areas","Chemical restrictions","Site hazards","Other equipment"],
+    items:["Hedges","Trees requiring attention","Irrigation zones"] }
+];
+const FS_LIB_APP = "firespark-equipment-library";
+function fsLibFind(key, extra) {
+  const all = FS_EQUIP_LIBS.concat(Array.isArray(extra) ? extra : []);
+  for (let i = 0; i < all.length; i++) if (all[i] && all[i].key === key) return all[i];
+  return null;
+}
+/* Merge selected libraries into ONE field list. First occurrence of a name wins its
+   position; a later library repeating it does NOT add a second row. A field is a
+   qty field if ANY contributing library flags it. */
+function fsLibMerge(keys, extra) {
+  const eq = [], items = [], seen = Object.create(null);
+  (keys || []).forEach(k => {
+    const lib = fsLibFind(k, extra);
+    if (!lib) return;
+    (lib.fields || []).forEach(f => {
+      const n = String(f).trim();
+      if (!n) return;
+      if (!seen[n]) { seen[n] = 1; eq.push(n); }
+    });
+    (lib.items || []).forEach(f => {
+      const n = String(f).trim();
+      if (n && items.indexOf(n) < 0) items.push(n);
+    });
+  });
+  /* never flag a qty field that is not actually in the merged list */
+  return { equipment: eq, equipmentItems: items.filter(n => eq.indexOf(n) >= 0) };
+}
+/* A loadable library file carries its own app marker so the wrong-file guard can
+   name the mistake, exactly like the register/profile guards. */
+function fsLibFromFile(obj) {
+  if (!obj || obj.app !== FS_LIB_APP) return null;
+  const fields = Array.isArray(obj.equipment) ? obj.equipment.map(x => String(x).trim()).filter(Boolean) : [];
+  if (!fields.length) return null;
+  const items = Array.isArray(obj.equipmentItems) ? obj.equipmentItems.map(x => String(x).trim()).filter(Boolean) : [];
+  const label = String(obj.label || obj.name || "Loaded library").trim() || "Loaded library";
+  const key = String(obj.key || ("custom-" + label.toLowerCase().replace(/[^a-z0-9]+/g, "-"))).trim();
+  return { key: key, label: label, fields: fields, items: items.filter(n => fields.indexOf(n) >= 0), custom: true };
+}
+
 /* ---------- Company profile: branding + equipment fields + checklists live in a LOCAL
    profile file (never in this public shell). Load via the Profile button. ---------- */
 let fsProfile = null;
@@ -6353,6 +6434,10 @@ async function fsLoadProfile() {
 function fsProfileFromFile(obj) {
   if (obj && (obj.app === "firespark-register" || obj.app === "firespark-bundle" || obj.clients)) {
     alert("That's a REGISTER file, not a company profile.\n\nLoad it with \ud83d\udcc2 Load / replace register file instead.\n\n(The company profile is stored inside the register anyway, so it usually doesn't need loading separately.)");
+    return false;
+  }
+  if (obj && obj.app === FS_LIB_APP) {
+    alert("That's an EQUIPMENT LIBRARY file, not a company profile.\n\nLoad it in the profile builder \u2192 Equipment libraries \u2192 Load a library file.");
     return false;
   }
   if (!obj || obj.app !== "firespark-profile" || !obj.company) { alert("That doesn't look like a FireSpark company profile file."); return false; }
@@ -7349,13 +7434,15 @@ function fsStamp() {
   el.textContent = "Register: " + (fsRegister.app || "register") +
     (fsRegister.updated ? " · updated " + fsRegister.updated : "") +
     (fsRegister.savedBy ? " by " + fsRegister.savedBy : "") +
-    (fsDirty ? " · UNSAVED CHANGES — export when done" : "");
+    (fsDirty ? " · UNSAVED CHANGES — save when done" : "");
   const ex = document.getElementById("fsExportReg");
   ex.style.display = fsRegister ? "inline-block" : "none";
   document.getElementById("fsPlannerBtn").style.display = (fsRegister && (typeof fsModOn !== "function" || fsModOn("planner"))) ? "inline-block" : "none";
   document.getElementById("fsDashBtn").style.display = (fsRegister && (typeof fsModOn !== "function" || fsModOn("dashboard"))) ? "inline-block" : "none";
-  ex.innerHTML = "&#128190; " + ((typeof fsRegFileHandle !== "undefined" && fsRegFileHandle) ? "Save register" : "Export register");
-  ex.title = "Saves the WHOLE register file \u2014 client data + company profile + test checklists in one. To share just the company setup, use Profile \u2192 Export profile.";
+  /* This must never be labelled as saving THE register - it writes a LOCAL file and
+     is not the central OneDrive copy. The old label flipped between two names. */
+  ex.innerHTML = "&#128190; " + ((typeof fsRegFileHandle !== "undefined" && fsRegFileHandle) ? "Save to file" : "Download a copy");
+  ex.title = "Writes a LOCAL file on this device \u2014 the whole register in one (client data + company profile + checklists). This is NOT the central register: for that use \ud83d\udcc1 Register file \u2192 Microsoft OneDrive.";
 }
 
 function fsCycleStatus(site, cyc) {
@@ -9728,8 +9815,9 @@ document.getElementById("fsExpClientBtn").onclick = () => {
   const d = document.createElement("div");
   d.style.cssText = "position:fixed;inset:0;z-index:400;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px";
   d.innerHTML = '<div style="background:#23272d;color:#eee;border-radius:12px;padding:18px;max-width:420px;width:100%;max-height:80vh;overflow-y:auto">' +
-    '<div style="font-weight:700;margin-bottom:4px;font-size:15px">Export one client</div>' +
+    '<div style="font-weight:700;margin-bottom:4px;font-size:15px">Copy of one client</div>' +
     '<div style="font-size:12px;color:#9aa;margin-bottom:10px">Makes a smaller register file holding just that client (sites, plans, tests and photos included) plus the company profile and checklists. Handy when the full register gets big &mdash; colleagues on one contract only need their client.</div>' +
+    '<div style="font-size:12px;color:#ffb74d;margin-bottom:10px;line-height:1.4">&#9888; This is a <b>dead-end copy</b>. Work done in it does <b>not</b> come back to the central register. Treat it as read-only, or you will end up with two versions that disagree.</div>' +
     '<div id="fsExpCList" style="display:flex;flex-direction:column;gap:8px"></div>' +
     '<div style="margin-top:12px;text-align:right"><button id="fsExpCX" style="padding:9px 14px;border-radius:8px;border:1px solid #4a5057;background:#2c3138;color:#ddd">Cancel</button></div></div>';
   document.body.appendChild(d);
@@ -9738,16 +9826,22 @@ document.getElementById("fsExpClientBtn").onclick = () => {
     const b = document.createElement("button");
     b.style.cssText = "padding:11px;border-radius:8px;border:0;background:#0e7c8c;color:#fff;font-weight:700;text-align:left";
     b.textContent = cl.name || "(unnamed client)";
-    b.onclick = () => {
+    b.onclick = async () => {
+      if (!confirm('Make a copy holding only "' + (cl.name || "this client") + '"?\n\n' +
+        'This copy is a DEAD END \u2014 anything edited in it will NOT come back to the central register. ' +
+        'Give it to someone as a read-only reference, not as a second place to work.\n\nContinue?')) return;
       d.remove();
       const out = {};
       Object.keys(fsRegister).forEach(k => { if (k !== "clients") out[k] = fsRegister[k]; });
       out.clients = [cl];
       out.updated = new Date().toISOString().slice(0, 10);
       const slug = (cl.name || "client").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
-      deliverFile(new Blob([JSON.stringify(out)], { type: "application/json" }), "firespark-register-" + slug + "-" + out.updated + ".json", "application/json").then(how => {
-        if (how === "cancelled") alert("\u26a0 Export cancelled \u2014 no file was saved.");
-      });
+      try {
+        /* a BUNDLE, not the old single .json - photos stay binary instead of ballooning as base64 */
+        const blob = await fsBuildBundle(out);
+        const how = await deliverFile(blob, "firespark-" + slug + "-" + out.updated + ".fsbundle", "application/zip");
+        if (how === "cancelled") alert("\u26a0 Cancelled \u2014 no file was saved.");
+      } catch (e) { alert("Couldn't build that copy: " + (e.message || e)); }
     };
     list.appendChild(b);
   });
@@ -12237,13 +12331,14 @@ function fsEqEditRender() {
   });
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' +
        '<button class="btn" id="fsEqAdd">&#65291; Add field</button>' +
-       '<button class="btn" id="fsEqReset">Reset to standard list</button>' +
+       '<button class="btn" id="fsEqReset">' + ((st.libs || []).length ? "Rebuild from libraries" : "Reset to standard list") + '</button>' +
        '<span style="flex:1"></span><button class="btn" id="fsEqDone">Done</button></div>';
   body.innerHTML = h;
   const sync = () => {
     body.querySelectorAll("[data-eqname]").forEach(inp => {
       const i = +inp.dataset.eqname, old = st.equipment[i], nv = inp.value.trim();
       if (nv && nv !== old) {
+        st.eqEdited = true;
         const j = st.equipmentItems.indexOf(old);
         st.equipment[i] = nv;
         if (j >= 0) st.equipmentItems[j] = nv;
@@ -12258,24 +12353,30 @@ function fsEqEditRender() {
     if (!cb.checked && j >= 0) st.equipmentItems.splice(j, 1);
   });
   body.querySelectorAll("[data-equp]").forEach(b => b.onclick = () => {
-    sync(); const i = +b.dataset.equp;
+    sync(); st.eqEdited = true; const i = +b.dataset.equp;
     st.equipment.splice(i - 1, 0, st.equipment.splice(i, 1)[0]); fsEqEditRender();
   });
   body.querySelectorAll("[data-eqdn]").forEach(b => b.onclick = () => {
-    sync(); const i = +b.dataset.eqdn;
+    sync(); st.eqEdited = true; const i = +b.dataset.eqdn;
     st.equipment.splice(i + 1, 0, st.equipment.splice(i, 1)[0]); fsEqEditRender();
   });
   body.querySelectorAll("[data-eqdel]").forEach(b => b.onclick = () => {
     sync(); const i = +b.dataset.eqdel, f = st.equipment[i];
     if (!confirm('Remove the "' + f + '" field?\n\nData already saved against it on existing sites stays in the register but stops being shown.')) return;
+    st.eqEdited = true;
     st.equipment.splice(i, 1);
     const j = st.equipmentItems.indexOf(f); if (j >= 0) st.equipmentItems.splice(j, 1);
     fsEqEditRender();
   });
-  document.getElementById("fsEqAdd").onclick = () => { sync(); st.equipment.push("New field"); fsEqEditRender(); };
+  document.getElementById("fsEqAdd").onclick = () => { sync(); st.eqEdited = true; st.equipment.push("New field"); fsEqEditRender(); };
   document.getElementById("fsEqReset").onclick = () => {
+    if ((st.libs || []).length) {
+      if (!confirm("Rebuild the equipment list from the ticked libraries?\n\nHand edits will be discarded.")) return;
+      const mg = fsLibMerge(st.libs, st.libExtra);
+      st.equipment = mg.equipment; st.equipmentItems = mg.equipmentItems; st.eqEdited = false; fsEqEditRender(); return;
+    }
     if (!confirm("Put the equipment list back to the standard set?")) return;
-    st.equipment = FS_EQUIP_FIELDS.slice(); st.equipmentItems = FS_EQUIP_ITEMS.slice(); fsEqEditRender();
+    st.equipment = FS_EQUIP_FIELDS.slice(); st.equipmentItems = FS_EQUIP_ITEMS.slice(); st.eqEdited = false; fsEqEditRender();
   };
   document.getElementById("fsEqDone").onclick = () => {
     sync();
@@ -12802,6 +12903,9 @@ try {
 /* ---------- profile builder (admin-gated, inside the Dashboard) ---------- */
 const FS_BLD_RES = [["battcalc", "Battery calculator"], ["timer", "Countdown timer"], ["meter", "Sound meter"],
                     ["annuals", "Annuals converter"], ["pa", "PA announcements"], ["qrlookup", "Scan QR tag"], ["library", "Library"]];
+/* ================= SparkCommand builder - VENDOR ONLY (part 2) ========================
+   Lifts out with part 1 when the standalone admin app exists. Do not put client-side
+   runtime code between these markers. */
 function fsBldGroups() {
   return [
     ["Test cycles", "cycles", [["monthly", "Monthly"], ["sixMonthly", "6 monthly"], ["annual", "Annual"], ["fiveYearly", "5 yearly"], ["fullFunction", "Full Function"]]],
@@ -12880,14 +12984,75 @@ function fsBuilderRender() {
     h += '</div><div style="margin-bottom:8px"><div style="font-size:11px;color:#999">Contact line shown on the lockout screen</div><input id="fsBldContact" value="' + fsEsc(a.contact).replace(/"/g, "&quot;") + '" placeholder="e.g. Call Reece on 04xx xxx xxx to keep going" style="width:100%;padding:8px;border-radius:8px;border:1px solid #444;background:#2e333a;color:#e8e8e8"></div>';
   }
   h += '<label style="display:flex;align-items:center;gap:7px;font-size:12.5px;margin:8px 0;cursor:pointer"><input type="checkbox" id="fsBldIncl"' + (st.incl ? " checked" : "") + '> Include the currently loaded profile’s equipment fields &amp; checklists' + (fsProfile ? "" : " (no profile loaded — defaults will apply)") + '</label>';
+  h += '<div style="font-size:12px;font-weight:700;color:#7ddb8f;margin:12px 0 3px">EQUIPMENT LIBRARIES</div>';
+  h += '<div style="font-size:11.5px;color:#999;margin-bottom:6px">Tick the disciplines this client works in. Fields shared by two libraries (Exit lights, Emergency lights, Other equipment) collapse to one row. Leave all unticked to inherit the loaded profile exactly as before.</div>';
+  h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:4px 10px;margin-bottom:6px">';
+  FS_EQUIP_LIBS.concat(st.libExtra || []).forEach(lib => {
+    const on = (st.libs || []).indexOf(lib.key) >= 0;
+    h += '<label style="display:flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer"><input type="checkbox" data-bldlib="' + fsEsc(lib.key) + '"' + (on ? " checked" : "") + '>' +
+         '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + fsEsc(lib.label) + (lib.custom ? ' <span style="color:#7ddb8f">(loaded)</span>' : '') + '</span>' +
+         '<span style="color:#777;font-size:11px">' + (lib.fields || []).length + '</span></label>';
+  });
+  h += '</div>';
+  if ((st.libs || []).length) {
+    const mg = fsLibMerge(st.libs, st.libExtra);
+    h += '<div style="font-size:11.5px;color:#7ddb8f;margin-bottom:6px">' + mg.equipment.length + ' fields after merge \u00b7 ' + mg.equipmentItems.length + ' with typed quantities</div>';
+  }
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px">' +
-       '<button class="btn" id="fsBldEqBtn">&#129520; Equipment fields' + (st.equipment ? ' <span style="color:#7ddb8f">(' + st.equipment.length + ' — edited)</span>' : '') + '</button>' +
+       '<button class="btn" id="fsBldLibLoad" style="font-size:12.5px">&#128194; Load a library file&hellip;</button>' +
+       '<button class="btn" id="fsBldEqBtn">&#129520; Equipment fields' + (st.equipment ? ' <span style="color:#7ddb8f">(' + st.equipment.length + (st.eqEdited ? ' — edited' : ' — from libraries') + ')</span>' : '') + '</button>' +
        '<button class="btn" id="fsBldCkBtn">&#128203; Checklists' + (st.checklists ? ' <span style="color:#7ddb8f">(edited)</span>' : '') + '</button></div>';
+  h += '<input type="file" id="fsBldLibFile" accept=".json,application/json" style="display:none">';
   h += '<div class="row" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="fsBldLoad">&#128194; Load profile to edit</button><span style="flex:1"></span><button class="btn" id="fsBldClose">Close</button><button class="btn" id="fsBldExport" style="background:#1b8a3f;border-color:#1b8a3f;color:#fff;font-weight:700">&#128190; Export profile file</button></div>';
   h += '<input type="file" id="fsBldFile" accept=".json,application/json" style="display:none">';
   body.innerHTML = h;
 
   /* wiring */
+  body.querySelectorAll("[data-bldlib]").forEach(cb => cb.onchange = () => {
+    syncTop();
+    const key = cb.dataset.bldlib;
+    st.libs = st.libs || [];
+    const i = st.libs.indexOf(key);
+    if (st.eqEdited && !confirm("Changing the libraries rebuilds the equipment list from the ticked libraries.\n\nYour hand edits to that list will be discarded.\n\nContinue?")) {
+      fsBuilderRender(); return;
+    }
+    if (cb.checked && i < 0) st.libs.push(key);
+    if (!cb.checked && i >= 0) st.libs.splice(i, 1);
+    if (st.libs.length) {
+      const mg = fsLibMerge(st.libs, st.libExtra);
+      st.equipment = mg.equipment; st.equipmentItems = mg.equipmentItems;
+    } else {
+      st.equipment = null; st.equipmentItems = null;   /* back to inheriting the loaded profile */
+    }
+    st.eqEdited = false;
+    fsBuilderRender();
+  });
+  const libLoad = document.getElementById("fsBldLibLoad");
+  if (libLoad) libLoad.onclick = () => { syncTop(); document.getElementById("fsBldLibFile").click(); };
+  const libFile = document.getElementById("fsBldLibFile");
+  if (libFile) libFile.onchange = e => {
+    const f = (e.target.files || [])[0];
+    e.target.value = "";
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      let obj = null;
+      try { obj = JSON.parse(r.result); } catch (err) { alert("Couldn't read that file."); return; }
+      if (obj && obj.app === "firespark-profile") { alert("That's a company PROFILE file, not an equipment library.\n\nUse \ud83d\udcc2 Load profile to edit instead."); return; }
+      if (obj && (obj.app === "firespark-register" || obj.app === "firespark-bundle" || obj.clients)) { alert("That's a REGISTER file, not an equipment library."); return; }
+      const lib = fsLibFromFile(obj);
+      if (!lib) { alert("That doesn't look like a FireSpark equipment library file.\n\nIt needs \"app\": \"" + FS_LIB_APP + "\" and an \"equipment\" list of field names."); return; }
+      st.libExtra = (st.libExtra || []).filter(x => x.key !== lib.key);
+      st.libExtra.push(lib);
+      st.libs = st.libs || [];
+      if (st.libs.indexOf(lib.key) < 0) st.libs.push(lib.key);
+      const mg = fsLibMerge(st.libs, st.libExtra);
+      st.equipment = mg.equipment; st.equipmentItems = mg.equipmentItems; st.eqEdited = false;
+      fsBuilderRender();
+      alert("Library loaded \u2713 \u2014 " + lib.label + " (" + lib.fields.length + " fields).");
+    };
+    r.readAsText(f);
+  };
   const eqb = document.getElementById("fsBldEqBtn");
   if (eqb) eqb.onclick = () => { syncTop(); fsEqEditOpen(); };
   const ckb = document.getElementById("fsBldCkBtn");
@@ -12939,6 +13104,11 @@ function fsBuilderRender() {
         if (!obj || obj.app !== "firespark-profile") { alert("That isn't a FireSpark profile file."); return; }
         const st2 = fsBldDefault();
         st2.equipment = null; st2.equipmentItems = null; st2.checklists = null;   /* start from the file, not the last edit */
+        st2.libs = Array.isArray(obj.libraries) ? obj.libraries.slice() : []; st2.libExtra = []; st2.eqEdited = false;
+        if (st2.libs.length) {
+          const mg0 = fsLibMerge(st2.libs, null);
+          if (mg0.equipment.length) { st2.equipment = mg0.equipment; st2.equipmentItems = mg0.equipmentItems; }
+        }
         st2.name = (obj.company && obj.company.name) || "";
         if (obj.modules) {
           const flat = (o, pre) => Object.entries(o).forEach(([k, v]) => {
@@ -12980,6 +13150,7 @@ function fsBuilderRender() {
     const eq = st.equipment || base.equipment;
     const eqi = st.equipmentItems || base.equipmentItems;
     const ckl = st.checklists || base.checklists;
+    if (st.libs && st.libs.length) out.libraries = st.libs.slice();
     if (eq && eq.length) out.equipment = eq;
     if (eqi && eqi.length) out.equipmentItems = eqi;
     if (ckl && ckl.modes) out.checklists = ckl;
@@ -12996,6 +13167,7 @@ function fsBuilderRender() {
       "firespark-profile-" + slug + "-" + new Date().toISOString().slice(0, 10) + ".json", "application/json");
   };
 }
+/* ================= end SparkCommand block (part 2) ===================================== */
 try {
   const _fsDashRenderD = fsDashRender;
   fsDashRender = function () {
