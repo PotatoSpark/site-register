@@ -167,7 +167,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.18 (fs 1.16)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.19 (fs 1.17)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -657,12 +657,24 @@
     <h3 style="margin-bottom:4px">&#128193; Register file</h3>
     <div style="font-size:12px;color:#999;margin-bottom:10px">One file holds everything &mdash; clients, sites, plans, tests and photos. Save after changes; share via OneDrive. Backups live in &#9881; Settings.</div>
     <div id="fsFileSlots" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
+    <button class="btn" id="fsMsBtn" style="width:100%;text-align:left">&#9729; Microsoft OneDrive &mdash; open / save in your own account&hellip;</button>
     <button class="btn" id="fsCloseRegBtn" style="width:100%;text-align:left">&#10005; Close register &mdash; back to the start screen</button>
     <button class="btn" id="fsWipeRegBtn" style="width:100%;text-align:left;color:#ff8a80">&#128465; Remove this register from this device&hellip;</button>
     <button class="btn" id="fsSaveBundleBtn" style="width:100%;text-align:left">&#128230; Save as .fsbundle &mdash; smaller, new format&hellip;</button>
     <button class="btn" id="fsSaveJsonBtn" style="width:100%;text-align:left">&#128196; Save as single .json &mdash; old format&hellip;</button>
     <button class="btn" id="fsExpClientBtn" style="width:100%;text-align:left">&#128100; Export ONE client as its own register&hellip;</button>
     <div class="row" style="margin-top:14px"><button class="btn" id="fsFileClose">Close</button></div>
+  </div>
+</div>
+<div class="modal" id="fsMsModal" style="z-index:121">
+  <div class="modalbox" style="max-width:520px;width:95vw;max-height:86vh;overflow-y:auto;text-align:left">
+    <h3 style="margin-bottom:4px">&#9729; Microsoft OneDrive</h3>
+    <div style="font-size:12px;color:#999;margin-bottom:12px">Keep the register in your own Microsoft account so it follows you between devices. Nothing is sent anywhere else &mdash; the app talks straight to your OneDrive.</div>
+    <div id="fsMsWho" style="font-size:13px;margin-bottom:10px"></div>
+    <div id="fsMsBody"></div>
+    <div class="row" style="margin-top:14px;gap:8px">
+      <button class="btn" id="fsMsSetup" style="font-size:12px">Connection setup&hellip;</button>
+      <span style="flex:1"></span><button class="btn" id="fsMsClose">Close</button></div>
   </div>
 </div>
 <div class="modal" id="wsSetModal" style="z-index:121">
@@ -6725,6 +6737,258 @@ async function fsSaveAsFormat(asBundle) {
   fsBackupSnapshot("saved");
 }
 
+
+/* ================= Microsoft OneDrive (Stage 2a) =====================================
+   Sign-in is the standard authorization-code flow with PKCE. A single-page app has NO
+   client secret by design - anything shipped to a browser is readable - so the only
+   thing that keeps a token safe is the redirect URI whitelist on the app registration.
+   The client id is a public identifier and is meant to live in the shipped file.
+
+   Nothing here changes WHERE the register lives for anyone already using a local file.
+   Cloud is an extra way in, never a replacement, and the app must keep working from its
+   local copy when there is no signal - that is the whole point of the thing. ========== */
+const FS_MS_CLIENT_DEFAULT = "";                 /* filled in once the app registration exists */
+const FS_MS_SCOPES = "Files.ReadWrite offline_access User.Read openid profile";
+const FS_MS_AUTH = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
+const FS_MS_TOKEN = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+const FS_MS_GRAPH = "https://graph.microsoft.com/v1.0";
+
+function fsMsClientId() {
+  try { return (localStorage.getItem("fs-ms-client") || "").trim() || FS_MS_CLIENT_DEFAULT; } catch (e) { return FS_MS_CLIENT_DEFAULT; }
+}
+function fsMsRedirect() { return location.origin + location.pathname; }
+function fsB64url(buf) {
+  let s = "";
+  const u = new Uint8Array(buf);
+  for (let i = 0; i < u.length; i++) s += String.fromCharCode(u[i]);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function fsRandStr(n) {
+  const u = new Uint8Array(n);
+  crypto.getRandomValues(u);
+  return fsB64url(u.buffer).slice(0, n);
+}
+async function fsPkce(v) { return fsB64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(v))); }
+
+async function fsMsTokens() { try { return (await idbGet("fsMsTok")) || null; } catch (e) { return null; } }
+async function fsMsSetTokens(t) { try { await idbPut("fsMsTok", t); } catch (e) {} }
+async function fsMsSignedIn() { const t = await fsMsTokens(); return !!(t && t.refresh_token); }
+
+async function fsMsSignIn() {
+  const cid = fsMsClientId();
+  if (!cid) { fsMsSetupPrompt(); return; }
+  const verifier = fsRandStr(64), state = fsRandStr(16);
+  try { sessionStorage.setItem("fs-ms-v", verifier); sessionStorage.setItem("fs-ms-s", state); } catch (e) {}
+  const u = FS_MS_AUTH + "?client_id=" + encodeURIComponent(cid) +
+    "&response_type=code&redirect_uri=" + encodeURIComponent(fsMsRedirect()) +
+    "&scope=" + encodeURIComponent(FS_MS_SCOPES) +
+    "&code_challenge=" + (await fsPkce(verifier)) + "&code_challenge_method=S256" +
+    "&state=" + state + "&prompt=select_account";
+  location.href = u;                     /* the register is cached on this device, so leaving and coming back is safe */
+}
+/* called on boot - picks up ?code= after Microsoft sends the browser back */
+async function fsMsHandleRedirect() {
+  const q = new URLSearchParams(location.search);
+  const code = q.get("code"), err = q.get("error");
+  if (!code && !err) return false;
+  const clean = () => history.replaceState({}, "", fsMsRedirect());
+  if (err) { clean(); alert("Microsoft sign-in was refused: " + (q.get("error_description") || err)); return false; }
+  let verifier = "", state = "";
+  try { verifier = sessionStorage.getItem("fs-ms-v") || ""; state = sessionStorage.getItem("fs-ms-s") || ""; } catch (e) {}
+  if (!verifier || q.get("state") !== state) { clean(); alert("Sign-in could not be verified — please try again."); return false; }
+  try {
+    const body = new URLSearchParams({
+      client_id: fsMsClientId(), grant_type: "authorization_code", code: code,
+      redirect_uri: fsMsRedirect(), code_verifier: verifier
+    });
+    const r = await fetch(FS_MS_TOKEN, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body });
+    const j = await r.json();
+    if (!r.ok || !j.access_token) throw new Error(j.error_description || j.error || "token request failed");
+    j.expires_at = Date.now() + (j.expires_in || 3600) * 1000;
+    await fsMsSetTokens(j);
+    try { sessionStorage.removeItem("fs-ms-v"); sessionStorage.removeItem("fs-ms-s"); } catch (e) {}
+    clean();
+    return true;
+  } catch (e) { clean(); alert("Couldn't finish signing in: " + (e && e.message ? e.message : e)); return false; }
+}
+/* a usable access token, refreshed if needed. Returns "" rather than throwing when
+   offline, so callers degrade to the local copy instead of blocking the user. */
+async function fsMsToken() {
+  const t = await fsMsTokens();
+  if (!t) return "";
+  if (t.access_token && t.expires_at && Date.now() < t.expires_at - 60000) return t.access_token;
+  if (!t.refresh_token) return "";
+  try {
+    const body = new URLSearchParams({
+      client_id: fsMsClientId(), grant_type: "refresh_token",
+      refresh_token: t.refresh_token, scope: FS_MS_SCOPES
+    });
+    const r = await fetch(FS_MS_TOKEN, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body });
+    const j = await r.json();
+    if (!r.ok || !j.access_token) return "";
+    j.refresh_token = j.refresh_token || t.refresh_token;
+    j.expires_at = Date.now() + (j.expires_in || 3600) * 1000;
+    await fsMsSetTokens(j);
+    return j.access_token;
+  } catch (e) { return ""; }          /* offline: keep working locally */
+}
+async function fsMsSignOut() {
+  try { await idbDel("fsMsTok"); } catch (e) {}
+  try { await idbDel("fsMsFile"); } catch (e) {}
+}
+async function fsGraph(path, opts) {
+  const tok = await fsMsToken();
+  if (!tok) throw new Error("Not signed in to Microsoft (or no connection).");
+  const o = opts || {};
+  const r = await fetch(path.indexOf("http") === 0 ? path : FS_MS_GRAPH + path, {
+    method: o.method || "GET",
+    headers: Object.assign({ Authorization: "Bearer " + tok }, o.headers || {}),
+    body: o.body
+  });
+  if (!r.ok) {
+    let d = "";
+    try { d = (await r.json()).error.message; } catch (e) {}
+    throw new Error("Microsoft said: " + r.status + (d ? " — " + d : ""));
+  }
+  return o.raw ? r : r.json();
+}
+async function fsMsMe() { return await fsGraph("/me"); }
+async function fsMsListBundles() {
+  const j = await fsGraph("/me/drive/root/search(q='.fsbundle')?$top=50&$select=id,name,size,lastModifiedDateTime,parentReference");
+  return (j.value || []).filter(f => /\.fsbundle$/i.test(f.name || ""));
+}
+async function fsMsDownload(id) {
+  const r = await fsGraph("/me/drive/items/" + encodeURIComponent(id) + "/content", { raw: true });
+  return await r.arrayBuffer();
+}
+/* small files go straight up; anything bigger needs a chunked session */
+async function fsMsUpload(name, blob, folderPath) {
+  const dir = (folderPath || "FireSpark").replace(/^\/+|\/+$/g, "");
+  const target = "/me/drive/root:/" + dir.split("/").map(encodeURIComponent).join("/") + "/" + encodeURIComponent(name);
+  if (blob.size < 4 * 1024 * 1024) {
+    return await fsGraph(target + ":/content", { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: blob });
+  }
+  const sess = await fsGraph(target + ":/createUploadSession", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item: { "@microsoft.graph.conflictBehavior": "replace" } })
+  });
+  const CH = 5 * 1024 * 1024;
+  let off = 0, last = null;
+  while (off < blob.size) {
+    const end = Math.min(off + CH, blob.size);
+    const part = blob.slice(off, end);
+    const r = await fetch(sess.uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Range": "bytes " + off + "-" + (end - 1) + "/" + blob.size },
+      body: part
+    });
+    if (!r.ok && r.status !== 202) throw new Error("Upload failed at " + Math.round(off / 1048576) + " MB (" + r.status + ")");
+    if (r.status !== 202) { last = await r.json(); }
+    off = end;
+    const el = document.getElementById("fsMsProg");
+    if (el) el.textContent = "Uploading… " + Math.round(off / blob.size * 100) + "%";
+  }
+  return last;
+}
+
+/* ---------- UI ---------- */
+function fsMsSetupPrompt() {
+  const cur = fsMsClientId();
+  const v = prompt("Microsoft app (client) ID.\n\nThis is a public identifier from the app registration — not a password. Leave blank to disconnect.", cur || "");
+  if (v === null) return;
+  try { localStorage.setItem("fs-ms-client", v.trim()); } catch (e) {}
+  fsMsRender();
+}
+async function fsMsOpenModal() {
+  document.getElementById("fsFileModal").classList.remove("show");
+  document.getElementById("fsMsModal").classList.add("show");
+  fsMsRender();
+}
+async function fsMsRender() {
+  const who = document.getElementById("fsMsWho"), body = document.getElementById("fsMsBody");
+  if (!fsMsClientId()) {
+    who.innerHTML = '<span style="color:#ffb74d">Not set up yet.</span>';
+    body.innerHTML = '<div style="font-size:12.5px;color:#999">This needs a Microsoft app registration first — a one-off, ten-minute job. Once you have the client ID from it, press <b>Connection setup</b> below and paste it in.</div>';
+    return;
+  }
+  if (!(await fsMsSignedIn())) {
+    who.innerHTML = "Not signed in.";
+    body.innerHTML = '<button class="btn" id="fsMsGo" style="width:100%;text-align:center;background:#2596ab;border-color:#2596ab;color:#fff;font-weight:700">Sign in with Microsoft</button>';
+    document.getElementById("fsMsGo").onclick = () => fsMsSignIn();
+    return;
+  }
+  who.innerHTML = '<span style="color:#7ddb8f">Signed in</span> <span id="fsMsName" style="color:#999"></span>';
+  body.innerHTML = '<div id="fsMsProg" style="font-size:12.5px;color:#7ddb8f;margin-bottom:8px"></div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">' +
+    '<button class="btn" id="fsMsSave">&#128190; Save register to OneDrive</button>' +
+    '<button class="btn" id="fsMsRefresh">&#8635; List files</button>' +
+    '<button class="btn" id="fsMsOut" style="color:#ff8a80">Sign out</button></div>' +
+    '<div id="fsMsList" style="font-size:13px"></div>';
+  document.getElementById("fsMsOut").onclick = async () => { await fsMsSignOut(); fsMsRender(); };
+  document.getElementById("fsMsRefresh").onclick = () => fsMsListRender();
+  document.getElementById("fsMsSave").onclick = () => fsMsSaveNow();
+  try { const me = await fsMsMe(); document.getElementById("fsMsName").textContent = "— " + (me.userPrincipalName || me.displayName || ""); } catch (e) {}
+  fsMsListRender();
+}
+async function fsMsListRender() {
+  const el = document.getElementById("fsMsList");
+  if (!el) return;
+  el.innerHTML = '<span style="color:#999">Looking…</span>';
+  let files = [];
+  try { files = await fsMsListBundles(); }
+  catch (e) { el.innerHTML = '<span style="color:#ff8a80">' + fsEsc(e.message || String(e)) + '</span>'; return; }
+  if (!files.length) { el.innerHTML = '<span style="color:#999">No .fsbundle files found in your OneDrive yet — use Save above to put one there.</span>'; return; }
+  el.innerHTML = files.map((f, i) =>
+    '<div style="display:flex;gap:8px;align-items:center;border-top:1px solid #33383f;padding:7px 0">' +
+    '<div style="flex:1;min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + fsEsc(f.name) + '</div>' +
+    '<div style="font-size:11px;color:#777">' + (f.size ? (f.size / 1048576).toFixed(1) + ' MB · ' : '') +
+    fsEsc((f.lastModifiedDateTime || "").slice(0, 10)) + '</div></div>' +
+    '<button class="btn fsMsOpen" data-i="' + i + '">Open</button></div>').join("");
+  el.querySelectorAll(".fsMsOpen").forEach(b => b.onclick = async () => {
+    const f = files[+b.dataset.i];
+    if (fsDirty && !confirm("You have UNSAVED changes — opening this replaces them. Continue?")) return;
+    const prog = document.getElementById("fsMsProg");
+    if (prog) prog.textContent = "Downloading " + f.name + "…";
+    try {
+      const buf = await fsMsDownload(f.id);
+      await fsLoadFromBuffer(buf);
+      await idbPut("fsMsFile", { id: f.id, name: f.name });
+      fsRegFileHandle = null;
+      if (prog) prog.textContent = "";
+      document.getElementById("fsMsModal").classList.remove("show");
+      alert("✓ Opened " + f.name + " from OneDrive.\n\nSave register will write straight back to it.");
+    } catch (e) {
+      if (prog) prog.textContent = "";
+      alert("Couldn't open that file: " + (e.message || e));
+    }
+  });
+}
+async function fsMsSaveNow() {
+  if (!fsRegister) { alert("No register is open."); return; }
+  const prog = document.getElementById("fsMsProg");
+  let who = "";
+  try { who = localStorage.getItem("fs-user") || ""; } catch (e) {}
+  fsRegister.updated = new Date().toISOString().slice(0, 10);
+  if (who) fsRegister.savedBy = who;
+  const prev = await idbGet("fsMsFile").catch(() => null);
+  const name = (prev && prev.name) || ("firespark-register-" + fsRegister.updated + ".fsbundle");
+  try {
+    if (prog) prog.textContent = "Packing…";
+    const blob = await fsBuildBundle(fsRegister);
+    if (prog) prog.textContent = "Uploading " + (blob.size / 1048576).toFixed(1) + " MB…";
+    const r = await fsMsUpload(name, blob, "FireSpark");
+    if (r && r.id) await idbPut("fsMsFile", { id: r.id, name: name });
+    fsDirty = false; fsBundleMode = true; fsStamp();
+    if (prog) prog.textContent = "";
+    await fsBackupSnapshot("saved to OneDrive");
+    alert("✓ Saved to OneDrive → FireSpark/" + name);
+    fsMsListRender();
+  } catch (e) {
+    if (prog) prog.textContent = "";
+    alert("Couldn't save to OneDrive: " + (e.message || e) + "\n\nYour work is still on this device — try again, or use Save register to write a local file.");
+  }
+}
+
 /* close the register in the app but leave it cached, so reopening is instant */
 function fsCloseRegister() {
   fsRegister = null; fsClient = null; fsSite = null; fsParentSite = null;
@@ -9254,6 +9518,9 @@ document.getElementById("fsCloseRegBtn").onclick = () => {
   fsCloseRegister();
 };
 document.getElementById("fsWipeRegBtn").onclick = () => fsWipeRegister();
+document.getElementById("fsMsBtn").onclick = () => fsMsOpenModal();
+document.getElementById("fsMsClose").onclick = () => document.getElementById("fsMsModal").classList.remove("show");
+document.getElementById("fsMsSetup").onclick = () => fsMsSetupPrompt();
 document.getElementById("fsSaveBundleBtn").onclick = () => { document.getElementById("fsFileModal").classList.remove("show"); fsSaveAsFormat(true); };
 document.getElementById("fsSaveJsonBtn").onclick = () => { document.getElementById("fsFileModal").classList.remove("show"); fsSaveAsFormat(false); };
 document.getElementById("fsFileClose").onclick = () => document.getElementById("fsFileModal").classList.remove("show");
@@ -10948,6 +11215,7 @@ document.getElementById("fsPlannerBtn").onclick = async () => {
 
 (async () => {
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  try { await fsMsHandleRedirect(); } catch (e) {}
   try {
     const cached = await fsReadReg();
     if (cached && cached.clients) {
