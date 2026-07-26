@@ -167,7 +167,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.17 (fs 1.15)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.18 (fs 1.16)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -11728,6 +11728,208 @@ async function fsSparkGate() {
   return true;
 }
 async function fsSparkOpen() { if (await fsSparkGate()) fsBuilderOpen(); }
+
+/* ================= Equipment + checklist editors (vendor side) =========================
+   These live INSIDE the builder because they define what a client is issued, not what a
+   client switches on. They sit above the builder in the stack (z 122 over its 121).
+   Builder state holds null until something is edited, so an untouched build keeps the
+   existing "inherit from the loaded profile" behaviour exactly. ========================= */
+function fsSubModal(id) {
+  let m = document.getElementById(id);
+  if (m) return m;
+  m = document.createElement("div");
+  m.className = "modal"; m.id = id; m.style.zIndex = "122";
+  m.innerHTML = '<div class="modalbox" style="max-width:600px;width:95vw;max-height:88vh;overflow-y:auto;text-align:left"><div id="' + id + 'Body"></div></div>';
+  document.body.appendChild(m);
+  return m;
+}
+function fsClone(o) { return o == null ? o : JSON.parse(JSON.stringify(o)); }
+
+/* ---------- equipment fields ---------- */
+function fsEqEditOpen() {
+  const st = fsBld;
+  if (!st.equipment) {
+    const base = (st._src && st._src.equipment) || (fsProfile && fsProfile.equipment) || FS_EQUIP_FIELDS;
+    st.equipment = fsClone(base).slice();
+  }
+  if (!st.equipmentItems) {
+    const base = (st._src && st._src.equipmentItems) || (fsProfile && fsProfile.equipmentItems) || FS_EQUIP_ITEMS;
+    st.equipmentItems = fsClone(base).slice();
+  }
+  fsSubModal("fsEqModal").classList.add("show");
+  fsEqEditRender();
+}
+function fsEqEditRender() {
+  const st = fsBld, body = document.getElementById("fsEqModalBody");
+  let h = '<h3 style="margin-bottom:4px">&#129520; Equipment fields</h3>';
+  h += '<div style="font-size:12px;color:#999;margin-bottom:12px">The rows that appear on every site\'s Site Equipment tab. ' +
+       'Tick <b>qty</b> where a field should take typed quantity lines like "2 &times; CO2 4.5kg".</div>';
+  h += '<div style="font-size:11.5px;color:#ffb74d;margin-bottom:10px">Renaming a field does not rename data already saved against the old name on existing sites.</div>';
+  st.equipment.forEach((f, i) => {
+    const isItem = st.equipmentItems.indexOf(f) >= 0;
+    h += '<div style="display:flex;gap:5px;align-items:center;margin-bottom:5px">' +
+      '<input data-eqname="' + i + '" value="' + fsEsc(f) + '" style="flex:1;min-width:0;padding:6px 8px;border-radius:6px;border:1px solid #444;background:#2e333a;color:#e8e8e8;font-size:13px">' +
+      '<label title="Typed quantity lines" style="display:flex;align-items:center;gap:3px;font-size:11.5px;cursor:pointer"><input type="checkbox" data-eqitem="' + i + '"' + (isItem ? " checked" : "") + '>qty</label>' +
+      '<button class="btn" data-equp="' + i + '" style="padding:3px 7px"' + (i ? '' : ' disabled') + '>&#9650;</button>' +
+      '<button class="btn" data-eqdn="' + i + '" style="padding:3px 7px"' + (i < st.equipment.length - 1 ? '' : ' disabled') + '>&#9660;</button>' +
+      '<button class="btn" data-eqdel="' + i + '" style="padding:3px 7px;color:#ff8a80">&#10005;</button></div>';
+  });
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' +
+       '<button class="btn" id="fsEqAdd">&#65291; Add field</button>' +
+       '<button class="btn" id="fsEqReset">Reset to standard list</button>' +
+       '<span style="flex:1"></span><button class="btn" id="fsEqDone">Done</button></div>';
+  body.innerHTML = h;
+  const sync = () => {
+    body.querySelectorAll("[data-eqname]").forEach(inp => {
+      const i = +inp.dataset.eqname, old = st.equipment[i], nv = inp.value.trim();
+      if (nv && nv !== old) {
+        const j = st.equipmentItems.indexOf(old);
+        st.equipment[i] = nv;
+        if (j >= 0) st.equipmentItems[j] = nv;
+      }
+    });
+  };
+  body.querySelectorAll("[data-eqname]").forEach(inp => inp.onchange = () => { sync(); fsEqEditRender(); });
+  body.querySelectorAll("[data-eqitem]").forEach(cb => cb.onchange = () => {
+    sync();
+    const f = st.equipment[+cb.dataset.eqitem], j = st.equipmentItems.indexOf(f);
+    if (cb.checked && j < 0) st.equipmentItems.push(f);
+    if (!cb.checked && j >= 0) st.equipmentItems.splice(j, 1);
+  });
+  body.querySelectorAll("[data-equp]").forEach(b => b.onclick = () => {
+    sync(); const i = +b.dataset.equp;
+    st.equipment.splice(i - 1, 0, st.equipment.splice(i, 1)[0]); fsEqEditRender();
+  });
+  body.querySelectorAll("[data-eqdn]").forEach(b => b.onclick = () => {
+    sync(); const i = +b.dataset.eqdn;
+    st.equipment.splice(i + 1, 0, st.equipment.splice(i, 1)[0]); fsEqEditRender();
+  });
+  body.querySelectorAll("[data-eqdel]").forEach(b => b.onclick = () => {
+    sync(); const i = +b.dataset.eqdel, f = st.equipment[i];
+    if (!confirm('Remove the "' + f + '" field?\n\nData already saved against it on existing sites stays in the register but stops being shown.')) return;
+    st.equipment.splice(i, 1);
+    const j = st.equipmentItems.indexOf(f); if (j >= 0) st.equipmentItems.splice(j, 1);
+    fsEqEditRender();
+  });
+  document.getElementById("fsEqAdd").onclick = () => { sync(); st.equipment.push("New field"); fsEqEditRender(); };
+  document.getElementById("fsEqReset").onclick = () => {
+    if (!confirm("Put the equipment list back to the standard set?")) return;
+    st.equipment = FS_EQUIP_FIELDS.slice(); st.equipmentItems = FS_EQUIP_ITEMS.slice(); fsEqEditRender();
+  };
+  document.getElementById("fsEqDone").onclick = () => {
+    sync();
+    document.getElementById("fsEqModal").classList.remove("show");
+    fsBuilderRender();
+  };
+}
+
+/* ---------- checklists ---------- */
+let fsCkMode = "";
+function fsCkEditOpen() {
+  const st = fsBld;
+  if (!st.checklists) {
+    const base = (st._src && st._src.checklists) || (fsProfile && fsProfile.checklists) || fsChecklists;
+    st.checklists = base && base.modes ? fsClone(base) : { app: "firespark-checklists", version: 1, modes: {} };
+  }
+  const ms = Object.keys(st.checklists.modes || {});
+  if (!fsCkMode || ms.indexOf(fsCkMode) < 0) fsCkMode = ms[0] || "";
+  fsSubModal("fsCkModal").classList.add("show");
+  fsCkEditRender();
+}
+function fsCkCount(md) { return (md && md.sections || []).reduce((a, s) => a + (s.items || []).length, 0); }
+function fsCkEditRender() {
+  const st = fsBld, body = document.getElementById("fsCkModalBody");
+  const cl = st.checklists;
+  const modes = Object.keys(cl.modes || {});
+  let h = '<h3 style="margin-bottom:4px">&#128203; Test checklists</h3>';
+  h += '<div style="font-size:12px;color:#999;margin-bottom:8px">What a tech ticks off during a test session. These are issued with the profile.</div>';
+  h += '<div style="font-size:11.5px;color:#ff8a80;margin-bottom:10px">These carry compliance meaning. Removing an item removes it from every future test on this profile — check the standard before cutting anything.</div>';
+  if (!modes.length) {
+    h += '<div style="font-size:13px;color:#999;margin-bottom:10px">No checklists in this profile yet.</div>';
+  } else {
+    h += '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">';
+    modes.forEach(m => {
+      const md = cl.modes[m];
+      h += '<button class="btn" data-ckmode="' + fsEsc(m) + '"' + (m === fsCkMode ? ' style="background:#2596ab;color:#fff"' : '') + '>' +
+           fsEsc(md.label || m) + ' <span style="opacity:.7">(' + fsCkCount(md) + ')</span></button>';
+    });
+    h += '</div>';
+  }
+  const md = cl.modes[fsCkMode];
+  if (md) {
+    h += '<div style="font-size:11.5px;color:#888;margin-bottom:8px">' + fsEsc(md.ref || "") + '</div>';
+    (md.sections || []).forEach((sec, si) => {
+      h += '<div style="border:1px solid #3a4047;border-radius:8px;padding:9px;margin-bottom:9px">';
+      h += '<div style="display:flex;gap:5px;align-items:center;margin-bottom:7px">' +
+        '<input data-cksec="' + si + '" value="' + fsEsc(sec.title || "") + '" style="flex:1;min-width:0;padding:6px 8px;border-radius:6px;border:1px solid #444;background:#2e333a;color:#e8e8e8;font-size:13px;font-weight:700">' +
+        '<button class="btn" data-cksup="' + si + '" style="padding:3px 7px"' + (si ? '' : ' disabled') + '>&#9650;</button>' +
+        '<button class="btn" data-cksdn="' + si + '" style="padding:3px 7px"' + (si < md.sections.length - 1 ? '' : ' disabled') + '>&#9660;</button>' +
+        '<button class="btn" data-cksdel="' + si + '" style="padding:3px 7px;color:#ff8a80">&#10005;</button></div>';
+      (sec.items || []).forEach((it, ii) => {
+        h += '<div style="display:flex;gap:4px;align-items:flex-start;margin-bottom:4px">' +
+          '<input data-ckk="' + si + '.' + ii + '" value="' + fsEsc(it.k || "") + '" style="width:62px;flex:none;padding:5px;border-radius:5px;border:1px solid #444;background:#262b31;color:#bbb;font-size:11.5px">' +
+          '<textarea data-ckt="' + si + '.' + ii + '" rows="2" style="flex:1;min-width:0;padding:5px 7px;border-radius:5px;border:1px solid #444;background:#262b31;color:#e8e8e8;font-size:12px;resize:vertical">' + fsEsc(it.t || "") + '</textarea>' +
+          '<button class="btn" data-ckidel="' + si + '.' + ii + '" style="padding:3px 6px;color:#ff8a80;flex:none">&#10005;</button></div>';
+      });
+      h += '<button class="btn" data-ckiadd="' + si + '" style="margin-top:4px">&#65291; Add item</button>';
+      h += '</div>';
+    });
+    h += '<button class="btn" id="fsCkSecAdd">&#65291; Add section</button>';
+  }
+  h += '<div class="row" style="margin-top:14px;gap:8px"><button class="btn" id="fsCkRevert">Revert to the loaded profile\'s</button>' +
+       '<span style="flex:1"></span><button class="btn" id="fsCkDone">Done</button></div>';
+  body.innerHTML = h;
+
+  const sync = () => {
+    const m2 = cl.modes[fsCkMode];
+    if (!m2) return;
+    body.querySelectorAll("[data-cksec]").forEach(i2 => { m2.sections[+i2.dataset.cksec].title = i2.value; });
+    body.querySelectorAll("[data-ckk]").forEach(i2 => {
+      const [a, b2] = i2.dataset.ckk.split("."); m2.sections[+a].items[+b2].k = i2.value;
+    });
+    body.querySelectorAll("[data-ckt]").forEach(i2 => {
+      const [a, b2] = i2.dataset.ckt.split("."); m2.sections[+a].items[+b2].t = i2.value;
+    });
+  };
+  body.querySelectorAll("[data-ckmode]").forEach(b => b.onclick = () => { sync(); fsCkMode = b.dataset.ckmode; fsCkEditRender(); });
+  body.querySelectorAll("[data-cksup]").forEach(b => b.onclick = () => {
+    sync(); const i = +b.dataset.cksup, s2 = cl.modes[fsCkMode].sections;
+    s2.splice(i - 1, 0, s2.splice(i, 1)[0]); fsCkEditRender();
+  });
+  body.querySelectorAll("[data-cksdn]").forEach(b => b.onclick = () => {
+    sync(); const i = +b.dataset.cksdn, s2 = cl.modes[fsCkMode].sections;
+    s2.splice(i + 1, 0, s2.splice(i, 1)[0]); fsCkEditRender();
+  });
+  body.querySelectorAll("[data-cksdel]").forEach(b => b.onclick = () => {
+    sync(); const i = +b.dataset.cksdel, s2 = cl.modes[fsCkMode].sections;
+    if (!confirm('Delete the section "' + (s2[i].title || "") + '" and its ' + (s2[i].items || []).length + ' items?')) return;
+    s2.splice(i, 1); fsCkEditRender();
+  });
+  body.querySelectorAll("[data-ckidel]").forEach(b => b.onclick = () => {
+    sync(); const [a, c] = b.dataset.ckidel.split(".");
+    const its = cl.modes[fsCkMode].sections[+a].items;
+    if (!confirm("Delete item " + (its[+c].k || "") + "?")) return;
+    its.splice(+c, 1); fsCkEditRender();
+  });
+  body.querySelectorAll("[data-ckiadd]").forEach(b => b.onclick = () => {
+    sync(); const sec = cl.modes[fsCkMode].sections[+b.dataset.ckiadd];
+    sec.items = sec.items || []; sec.items.push({ k: "", t: "" }); fsCkEditRender();
+  });
+  const sa = document.getElementById("fsCkSecAdd");
+  if (sa) sa.onclick = () => {
+    sync(); const m2 = cl.modes[fsCkMode];
+    m2.sections = m2.sections || []; m2.sections.push({ title: "New section", items: [] }); fsCkEditRender();
+  };
+  document.getElementById("fsCkRevert").onclick = () => {
+    if (!confirm("Throw away the checklist edits and go back to the loaded profile's?")) return;
+    st.checklists = null; fsCkEditOpen();
+  };
+  document.getElementById("fsCkDone").onclick = () => {
+    sync();
+    document.getElementById("fsCkModal").classList.remove("show");
+    fsBuilderRender();
+  };
+}
 /* ================= end SparkCommand block ============================================= */
 
 /* ---------- access gate (client-side trial gate — NOT licensing; bypassable by design) ---------- */
@@ -12154,7 +12356,8 @@ function fsBldDefault() {
   fsBldGroups().forEach(([, gk, items]) => items.forEach(([k]) => { m[(gk ? gk + "." : "") + k] = true; }));
   const g = {};
   fsBldGroups().forEach(([, gk, items]) => items.forEach(([k]) => { g[(gk ? gk + "." : "") + k] = true; }));
-  return { name: "", modules: m, grants: g, access: { mode: "none", start: "", expiry: "", user: "", pass: "", passHash: "", contact: "" }, incl: true };
+  return { name: "", modules: m, grants: g, equipment: null, equipmentItems: null, checklists: null,
+           access: { mode: "none", start: "", expiry: "", user: "", pass: "", passHash: "", contact: "" }, incl: true };
 }
 const FS_BLD_PRESETS = {
   full: () => {},
@@ -12216,11 +12419,18 @@ function fsBuilderRender() {
     h += '</div><div style="margin-bottom:8px"><div style="font-size:11px;color:#999">Contact line shown on the lockout screen</div><input id="fsBldContact" value="' + fsEsc(a.contact).replace(/"/g, "&quot;") + '" placeholder="e.g. Call Reece on 04xx xxx xxx to keep going" style="width:100%;padding:8px;border-radius:8px;border:1px solid #444;background:#2e333a;color:#e8e8e8"></div>';
   }
   h += '<label style="display:flex;align-items:center;gap:7px;font-size:12.5px;margin:8px 0;cursor:pointer"><input type="checkbox" id="fsBldIncl"' + (st.incl ? " checked" : "") + '> Include the currently loaded profile’s equipment fields &amp; checklists' + (fsProfile ? "" : " (no profile loaded — defaults will apply)") + '</label>';
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px">' +
+       '<button class="btn" id="fsBldEqBtn">&#129520; Equipment fields' + (st.equipment ? ' <span style="color:#7ddb8f">(' + st.equipment.length + ' — edited)</span>' : '') + '</button>' +
+       '<button class="btn" id="fsBldCkBtn">&#128203; Checklists' + (st.checklists ? ' <span style="color:#7ddb8f">(edited)</span>' : '') + '</button></div>';
   h += '<div class="row" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="fsBldLoad">&#128194; Load profile to edit</button><span style="flex:1"></span><button class="btn" id="fsBldClose">Close</button><button class="btn" id="fsBldExport" style="background:#1b8a3f;border-color:#1b8a3f;color:#fff;font-weight:700">&#128190; Export profile file</button></div>';
   h += '<input type="file" id="fsBldFile" accept=".json,application/json" style="display:none">';
   body.innerHTML = h;
 
   /* wiring */
+  const eqb = document.getElementById("fsBldEqBtn");
+  if (eqb) eqb.onclick = () => { syncTop(); fsEqEditOpen(); };
+  const ckb = document.getElementById("fsBldCkBtn");
+  if (ckb) ckb.onclick = () => { syncTop(); fsCkEditOpen(); };
   body.querySelectorAll("[data-bldgrant]").forEach(cb => cb.onchange = () => {
     st.grants = st.grants || {};
     st.grants[cb.dataset.bldgrant] = cb.checked;
@@ -12267,6 +12477,7 @@ function fsBuilderRender() {
         const obj = JSON.parse(r.result);
         if (!obj || obj.app !== "firespark-profile") { alert("That isn't a FireSpark profile file."); return; }
         const st2 = fsBldDefault();
+        st2.equipment = null; st2.equipmentItems = null; st2.checklists = null;   /* start from the file, not the last edit */
         st2.name = (obj.company && obj.company.name) || "";
         if (obj.modules) {
           const flat = (o, pre) => Object.entries(o).forEach(([k, v]) => {
@@ -12305,9 +12516,12 @@ function fsBuilderRender() {
       if (!confirm("WARNING — the equipment fields and test checklists box is UNTICKED.\n\nThe exported profile will contain NO equipment fields and NO checklists. Anyone loading it loses them.\n\nExport anyway?")) return;
     }
     const out = { app: "firespark-profile", version: 2, created: new Date().toISOString().slice(0, 10), company: { name: name }, modules: modules, grants: grants };
-    if (base.equipment && base.equipment.length) out.equipment = base.equipment;
-    if (base.equipmentItems && base.equipmentItems.length) out.equipmentItems = base.equipmentItems;
-    if (base.checklists && base.checklists.modes) out.checklists = base.checklists;
+    const eq = st.equipment || base.equipment;
+    const eqi = st.equipmentItems || base.equipmentItems;
+    const ckl = st.checklists || base.checklists;
+    if (eq && eq.length) out.equipment = eq;
+    if (eqi && eqi.length) out.equipmentItems = eqi;
+    if (ckl && ckl.modes) out.checklists = ckl;
     if (st.access.mode !== "none") {
       const a = st.access;
       let passHash = a.passHash || "";
