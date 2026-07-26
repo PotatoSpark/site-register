@@ -167,7 +167,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.13 (fs 1.11)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.14 (fs 1.12)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -4055,7 +4055,7 @@ async function autosaveNow() {
       fsSite.plan = { levels: levels, cur: curLevel, labelsOn: labelsOn, siteNotes: siteNotes, sitePhotos: sitePhotos, t: Date.now() };
       if (typeof fsRegister !== "undefined" && fsRegister) {
         fsDirty = true;
-        idbPut("fsRegister", fsRegister).catch(() => {});
+        if (typeof fsPersistReg === "function") fsPersistReg();
         if (typeof fsStamp === "function") fsStamp();
       }
     }
@@ -6337,6 +6337,187 @@ function fsShow(view) {
 }
 function fsEsc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
 
+/* ================= Register store - split persistence (Stage 1A) =================
+   The register is HELD IN MEMORY exactly as before (fsRegister), so every read
+   path in the app is unchanged. Only the way it is written to this device changed.
+
+   Before: every edit wrote the whole register object under a single key. On a
+   real register that is tens of MB re-serialised and rewritten per keystroke,
+   and every backup kept another whole copy (five of them).
+
+   Now it persists as parts:
+       fsIdx            the register with images/plans swapped for small markers
+       fsBlob:<hash>    one copy of each image, addressed by its own content
+       fsPlan:<id>      one block plan per site / building / project
+
+   Images are content-addressed, so identical pictures collapse to one copy and
+   an unchanged image is never rewritten. Splitting walks the FIELDS of the
+   register, not the bytes of the images, so it stays cheap as photos pile up. */
+const FS_BLOB_MIN = 1024;            /* shorter data: strings stay inline */
+let fsBlobHashes = new Map();        /* dataUrl -> hash, for this session */
+let fsBlobHave = null;               /* hashes already in the store */
+let fsPersistT = null, fsPersistQ = [];
+
+/* own key lister - the register-only build has no recovery vault, so this block
+   cannot lean on that app's key helper existing */
+async function fsStoreKeys() {
+  const db = await idb();
+  return new Promise((res, rej) => {
+    const rq = db.transaction("kv").objectStore("kv").getAllKeys();
+    rq.onsuccess = () => res(rq.result || []);
+    rq.onerror = () => rej(rq.error);
+  });
+}
+async function fsSha(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+async function fsBlobId(dataUrl) {
+  let h = fsBlobHashes.get(dataUrl);
+  if (!h) { h = await fsSha(dataUrl); fsBlobHashes.set(dataUrl, h); }
+  return h;
+}
+/* deep copy of the register with images and plans lifted out as we go */
+async function fsSplitReg(reg) {
+  const blobs = new Map(), plans = new Map();
+  let bytes = 0;
+  async function walk(v, ownerId) {
+    if (typeof v === "string") {
+      if (v.length >= FS_BLOB_MIN && v.slice(0, 5) === "data:") {
+        const h = await fsBlobId(v);
+        blobs.set(h, v); bytes += v.length;
+        return { __b: h };
+      }
+      return v;
+    }
+    if (!v || typeof v !== "object") return v;
+    if (Array.isArray(v)) {
+      const out = [];
+      for (let i = 0; i < v.length; i++) out.push(await walk(v[i], ownerId));
+      return out;
+    }
+    const id = (typeof v.id === "string" && v.id) ? v.id : ownerId;
+    const out = {};
+    for (const k in v) {
+      if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
+      if (k === "plan" && v[k] && typeof v[k] === "object" && !Array.isArray(v[k]) && id) {
+        plans.set(id, v[k]);
+        out[k] = { __p: id };
+        continue;
+      }
+      out[k] = await walk(v[k], id);
+    }
+    return out;
+  }
+  const idx = await walk(reg, null);
+  return { idx: idx, blobs: blobs, plans: plans, bytes: bytes };
+}
+/* put the images and plans back, so the in-memory register looks untouched */
+async function fsJoinReg(idx) {
+  async function walk(v) {
+    if (!v || typeof v !== "object") return v;
+    if (Array.isArray(v)) {
+      const out = [];
+      for (let i = 0; i < v.length; i++) out.push(await walk(v[i]));
+      return out;
+    }
+    if (typeof v.__b === "string") {
+      const d = await idbGet("fsBlob:" + v.__b);
+      if (typeof d === "string") { fsBlobHashes.set(d, v.__b); return d; }
+      return "";
+    }
+    if (typeof v.__p === "string") {
+      const p = await idbGet("fsPlan:" + v.__p);
+      return p || null;
+    }
+    const out = {};
+    for (const k in v) {
+      if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
+      out[k] = await walk(v[k]);
+    }
+    return out;
+  }
+  return await walk(idx);
+}
+async function fsWriteParts(sp) {
+  if (!fsBlobHave) {
+    fsBlobHave = new Set();
+    try {
+      (await fsStoreKeys()).forEach(k => {
+        if (typeof k === "string" && k.indexOf("fsBlob:") === 0) fsBlobHave.add(k.slice(7));
+      });
+    } catch (e) {}
+  }
+  for (const en of sp.blobs) {
+    if (fsBlobHave.has(en[0])) continue;      /* same picture, already stored */
+    await idbPut("fsBlob:" + en[0], en[1]);
+    fsBlobHave.add(en[0]);
+  }
+  for (const en of sp.plans) await idbPut("fsPlan:" + en[0], en[1]);
+}
+/* write the register to this device. Debounced, so typing coalesces into one write. */
+function fsPersistReg(now) {
+  const run = async () => {
+    if (!fsRegister) return;
+    const sp = await fsSplitReg(fsRegister);
+    await fsWriteParts(sp);
+    await idbPut("fsIdx", sp.idx);
+  };
+  if (now) {
+    if (fsPersistT) { clearTimeout(fsPersistT); fsPersistT = null; }
+    const q = fsPersistQ; fsPersistQ = [];
+    const p = run();
+    p.then(() => q.forEach(r => r()), () => q.forEach(r => r()));
+    return p;
+  }
+  return new Promise(res => {
+    fsPersistQ.push(res);
+    if (fsPersistT) clearTimeout(fsPersistT);
+    fsPersistT = setTimeout(() => {
+      fsPersistT = null;
+      const q = fsPersistQ; fsPersistQ = [];
+      run().catch(() => {}).then(() => q.forEach(r => r()));
+    }, 400);
+  });
+}
+/* read the register back off this device; converts an older whole-blob cache once */
+async function fsReadReg() {
+  let legacy = null;
+  try { legacy = await idbGet("fsRegister"); } catch (e) {}
+  if (legacy && legacy.clients) {
+    fsRegister = legacy;
+    try { await fsPersistReg(true); await idbDel("fsRegister"); } catch (e) {}
+    return legacy;
+  }
+  let idx = null;
+  try { idx = await idbGet("fsIdx"); } catch (e) {}
+  if (!idx || !idx.clients) return null;
+  return await fsJoinReg(idx);
+}
+/* drop images no longer referenced by the register or any kept backup */
+async function fsBlobGC() {
+  try {
+    const live = new Set();
+    const scan = o => {
+      if (!o || typeof o !== "object") return;
+      if (Array.isArray(o)) { o.forEach(scan); return; }
+      if (typeof o.__b === "string") { live.add(o.__b); return; }
+      for (const k in o) if (Object.prototype.hasOwnProperty.call(o, k)) scan(o[k]);
+    };
+    const idx = await idbGet("fsIdx");
+    if (!idx || !idx.clients) return;                /* nothing trustworthy to compare against */
+    scan(idx);
+    ((await idbGet("fsRegBackups")) || []).forEach(b => {
+      try { if (b && b.idx) scan(JSON.parse(b.idx)); } catch (e) {}
+    });
+    for (const k of await fsStoreKeys()) {
+      if (typeof k === "string" && k.indexOf("fsBlob:") === 0 && !live.has(k.slice(7))) {
+        await idbDel(k);
+        if (fsBlobHave) fsBlobHave.delete(k.slice(7));
+      }
+    }
+  } catch (e) {}
+}
 function fsEnsureIds() {
   let migrated = false;
   (fsRegister.clients || []).forEach((c, ci) => {
@@ -6349,10 +6530,10 @@ function fsEnsureIds() {
       });
     });
   });
-  if (migrated) { fsDirty = true; idbPut("fsRegister", fsRegister).catch(() => {}); }
+  if (migrated) { fsDirty = true; fsPersistReg(); }
 }
 
-function fsMarkDirty() { fsDirty = true; fsStamp(); idbPut("fsRegister", fsRegister).catch(() => {}); }
+function fsMarkDirty() { fsDirty = true; fsStamp(); fsPersistReg(); }
 /* ---------- Portfolio dashboard: all-sites management view behind an admin passcode.
    The passcode hash lives IN the register file (register.adminPin) so it travels to
    colleagues' copies. Forgot it? Delete the "adminPin" entry from the register json. ---------- */
@@ -7862,7 +8043,7 @@ function fsLoadRegister(objIn) {
   fsDirty = false;
   if (fsRegister.app !== "firespark-register") { fsRegister.app = "firespark-register"; fsDirty = true; }
   fsEnsureIds();   // may set fsDirty if data was migrated (save to keep it)
-  idbPut("fsRegister", fsRegister).catch(() => alert("⚠ Couldn't cache the register on this device (storage full?) — it will need reloading next time."));
+  fsPersistReg(true).then(() => fsBlobGC()).catch(() => alert("⚠ Couldn't cache the register on this device (storage full?) — it will need reloading next time."));
   fsBackupSnapshot("loaded");
   fsLoadProfile();
   fsStamp();
@@ -7892,7 +8073,10 @@ async function fsBackupSnapshot(why) {
   if (!fsRegister) return;
   try {
     const list = (await idbGet("fsRegBackups")) || [];
-    list.unshift({ t: Date.now(), why: why || "", savedBy: fsRegister.savedBy || "", json: JSON.stringify(fsRegister) });
+    const sp = await fsSplitReg(fsRegister);
+    await fsWriteParts(sp);                      /* this snapshot's images are in the shared store */
+    const idxJson = JSON.stringify(sp.idx);
+    list.unshift({ t: Date.now(), why: why || "", savedBy: fsRegister.savedBy || "", idx: idxJson, size: sp.bytes + idxJson.length });
     while (list.length > 5) list.pop();
     await idbPut("fsRegBackups", list);
   } catch (e) {}
@@ -7906,18 +8090,18 @@ document.getElementById("fsBackupsBtn").onclick = async () => {
   list.forEach((b, i) => {
     html += '<div style="border-top:1px solid var(--fs-border);padding:9px 0;display:flex;gap:10px;align-items:center">' +
       '<div style="flex:1;font-size:13.5px"><b>' + new Date(b.t).toLocaleString() + '</b>' +
-      '<div style="font-size:12px;color:var(--fs-sub2)">' + fsEsc(b.why) + (b.savedBy ? ' · ' + fsEsc(b.savedBy) : '') + ' · ' + Math.round(b.json.length / 1024) + ' KB</div></div>' +
+      '<div style="font-size:12px;color:var(--fs-sub2)">' + fsEsc(b.why) + (b.savedBy ? ' · ' + fsEsc(b.savedBy) : '') + ' · ' + Math.round((b.size || (b.json ? b.json.length : (b.idx || '').length)) / 1024) + ' KB</div></div>' +
       '<button class="fsbtn fsBakRestore" data-i="' + i + '" style="color:#1b8a3f;font-weight:700">Restore</button></div>';
   });
   html += '<div style="margin-top:12px;text-align:right"><button class="fsbtn" id="fsBakClose">Close</button></div>';
   box.innerHTML = html;
   document.getElementById("fsBakModal").classList.add("show");
   document.getElementById("fsBakClose").onclick = () => document.getElementById("fsBakModal").classList.remove("show");
-  document.querySelectorAll(".fsBakRestore").forEach(btn => btn.onclick = () => {
+  document.querySelectorAll(".fsBakRestore").forEach(btn => btn.onclick = async () => {
     const b = list[+btn.dataset.i];
     if (!b || !confirm("Restore the register backup from " + new Date(b.t).toLocaleString() + "? Current in-app register is replaced (a backup of it is kept).")) return;
     document.getElementById("fsBakModal").classList.remove("show");
-    fsLoadRegister(JSON.parse(b.json));
+    fsLoadRegister(b.json ? JSON.parse(b.json) : await fsJoinReg(JSON.parse(b.idx)));
     fsDirty = true; fsStamp();
   });
 };
@@ -10261,7 +10445,7 @@ document.getElementById("fsPlannerBtn").onclick = async () => {
 (async () => {
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
   try {
-    const cached = await idbGet("fsRegister");
+    const cached = await fsReadReg();
     if (cached && cached.clients) {
       fsRegister = cached;
       fsEnsureIds();
