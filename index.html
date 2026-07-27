@@ -171,7 +171,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.28 (fs 1.26)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.29 (fs 1.27)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -526,6 +526,28 @@
     </div>
   </div>
 </div>
+<div class="modal" id="fsAnnModal" style="z-index:124">
+  <div class="modalbox" style="max-width:min(96vw,760px);width:96vw;text-align:left">
+    <h3 style="margin-bottom:2px">Mark up the photo</h3>
+    <div style="font-size:12px;color:#8fa2ab;margin-bottom:8px">Draw on it to point at the problem. The markup is burnt into the picture, so it survives the quote PDF and the export.</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+      <button class="btn fsAnnCol" data-c="#ff2d2d" type="button" style="background:#ff2d2d;color:#fff;min-width:44px">Red</button>
+      <button class="btn fsAnnCol" data-c="#ffd400" type="button" style="background:#ffd400;color:#101214;min-width:44px">Yellow</button>
+      <button class="btn fsAnnCol" data-c="#ffffff" type="button" style="background:#fff;color:#101214;min-width:44px">White</button>
+      <span style="flex:1"></span>
+      <button class="btn" id="fsAnnUndo" type="button">&#8617; Undo</button>
+      <button class="btn" id="fsAnnClear" type="button">Clear</button>
+    </div>
+    <div style="background:#000;border-radius:8px;overflow:auto;max-height:62vh;text-align:center">
+      <canvas id="fsAnnCanvas" style="max-width:100%;touch-action:none;cursor:crosshair"></canvas>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="fsAnnCancel" type="button">Cancel</button>
+      <button class="btn primary" id="fsAnnSave" type="button">Save markup</button>
+    </div>
+  </div>
+</div>
+<input type="file" id="fsDefMorePhoto" accept="image/*" capture="environment" style="display:none">
 <div class="modal" id="fsDefectModal" style="z-index:123" data-cls="">
   <div class="modalbox" style="max-width:480px;width:94vw;text-align:left;max-height:92vh;overflow:auto">
     <h3 style="margin-bottom:2px">Raise a defect</h3>
@@ -8943,6 +8965,61 @@ function fsDefTypeLibLoad(key) {
   return { added: added, skipped: skipped };
 }
 
+
+/* ===== Photo markup =========================================================
+   Uptick's loudest public complaint is that you cannot label a picture
+   ("you can't label pictures, record videos, or properly show proof of your
+   work" - Google Play, 22 Feb 2026). A photo of a fault with an arrow on it is
+   worth more than the same photo without one, and this is cheap.
+
+   Strokes are FLATTENED onto the image on save, so the markup survives the
+   quote PDF, the CSV handoff and anything else that only ever sees a data URL.
+   That also means it cannot be un-drawn later - hence undo and clear before
+   saving, and the original stays untouched until Save is pressed. */
+
+let fsAnnStrokes = [], fsAnnCol = "#ff2d2d", fsAnnImg = null, fsAnnDone = null, fsAnnDrawing = false;
+
+function fsAnnOpen(src, onSave) {
+  fsAnnStrokes = []; fsAnnDone = onSave || null;
+  const im = new Image();
+  im.onload = () => {
+    fsAnnImg = im;
+    const c = document.getElementById("fsAnnCanvas");
+    c.width = im.naturalWidth; c.height = im.naturalHeight;
+    fsAnnPaint();
+    document.getElementById("fsAnnModal").classList.add("show");
+  };
+  im.onerror = () => alert("Couldn't open that photo.");
+  im.src = src;
+}
+function fsAnnPaint() {
+  const c = document.getElementById("fsAnnCanvas");
+  if (!c || !fsAnnImg) return;
+  const g = c.getContext("2d");
+  g.clearRect(0, 0, c.width, c.height);
+  g.drawImage(fsAnnImg, 0, 0);
+  /* line width scales with the picture so markup reads the same on a 4000px
+     photo and an 800px one */
+  const w = Math.max(3, Math.round(Math.max(c.width, c.height) / 220));
+  g.lineCap = "round"; g.lineJoin = "round"; g.lineWidth = w;
+  fsAnnStrokes.forEach(s => {
+    if (s.pts.length < 2) return;
+    g.strokeStyle = s.col;
+    g.beginPath();
+    g.moveTo(s.pts[0].x, s.pts[0].y);
+    for (let i = 1; i < s.pts.length; i++) g.lineTo(s.pts[i].x, s.pts[i].y);
+    g.stroke();
+  });
+}
+function fsAnnPt(e) {
+  const c = document.getElementById("fsAnnCanvas");
+  const r = c.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * (c.width / r.width),
+           y: (e.clientY - r.top) * (c.height / r.height) };
+}
+/* ===== end photo markup ===================================================== */
+
+
 /* ===== Raise-defect form =====================================================
    One screen. Type and Location are required; everything else is prefilled from
    the type or optional. A photo is required for a critical or non-critical
@@ -9103,6 +9180,76 @@ function fsDefShowInWorkspace(d) {
   };
   document.getElementById("fsDfCancel").onclick = () => document.getElementById("fsDefectModal").classList.remove("show");
   document.getElementById("fsDfSave").onclick = fsDefFormSave;
+})();
+
+
+/* ---- photo markup wiring ---- */
+(function () {
+  const c = document.getElementById("fsAnnCanvas");
+  if (!c) return;
+  c.addEventListener("pointerdown", e => {
+    fsAnnDrawing = true;
+    try { c.setPointerCapture(e.pointerId); } catch (x) {}
+    fsAnnStrokes.push({ col: fsAnnCol, pts: [fsAnnPt(e)] });
+    e.preventDefault();
+  });
+  c.addEventListener("pointermove", e => {
+    if (!fsAnnDrawing) return;
+    fsAnnStrokes[fsAnnStrokes.length - 1].pts.push(fsAnnPt(e));
+    fsAnnPaint();
+    e.preventDefault();
+  });
+  const stop = () => { fsAnnDrawing = false; };
+  c.addEventListener("pointerup", stop);
+  c.addEventListener("pointercancel", stop);
+  c.addEventListener("pointerleave", stop);
+
+  document.querySelectorAll(".fsAnnCol").forEach(b => b.onclick = () => {
+    fsAnnCol = b.dataset.c;
+    document.querySelectorAll(".fsAnnCol").forEach(x => x.style.outline = x === b ? "3px solid var(--fs-accent)" : "none");
+  });
+  document.getElementById("fsAnnUndo").onclick = () => { fsAnnStrokes.pop(); fsAnnPaint(); };
+  document.getElementById("fsAnnClear").onclick = () => { fsAnnStrokes = []; fsAnnPaint(); };
+  document.getElementById("fsAnnCancel").onclick = () => document.getElementById("fsAnnModal").classList.remove("show");
+  document.getElementById("fsAnnSave").onclick = () => {
+    if (!fsAnnStrokes.length) {
+      if (!confirm("Nothing drawn. Save it unchanged?")) return;
+    }
+    const out = document.getElementById("fsAnnCanvas").toDataURL("image/jpeg", 0.85);
+    document.getElementById("fsAnnModal").classList.remove("show");
+    if (fsAnnDone) fsAnnDone(out);
+  };
+})();
+
+/* ---- adding another photo to an existing defect ---- */
+let fsDefPhotoTarget = null;
+(function () {
+  const inp = document.getElementById("fsDefMorePhoto");
+  if (!inp) return;
+  inp.onchange = e => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    const d = fsDefPhotoTarget;
+    fsDefPhotoTarget = null;
+    if (!f || !d) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      const im = new Image();
+      im.onload = () => {
+        const c = document.createElement("canvas");
+        const sc = Math.min(1, 1400 / Math.max(im.naturalWidth, im.naturalHeight));
+        c.width = Math.round(im.naturalWidth * sc); c.height = Math.round(im.naturalHeight * sc);
+        c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+        d.photos = d.photos || [];
+        d.photos.push(c.toDataURL("image/jpeg", 0.82));
+        fsMarkDirty();
+        if (typeof fsRenderSite === "function") fsRenderSite();
+      };
+      im.onerror = () => alert("Couldn't read that photo (HEIC from the Files app? Convert it to JPEG first).");
+      im.src = rd.result;
+    };
+    rd.readAsDataURL(f);
+  };
 })();
 
 /* ===== end raise-defect form ================================================ */
@@ -10155,7 +10302,8 @@ function fsRenderTab() {
       const dys = fsDefDays(d), bk = fsDefBucket(dys), qs = fsQs(d);
       const dc = fsDefCls(d.cls), nl = fsDefNotifyLabel(d);
       html += '<div style="border-top:1px solid var(--fs-border);padding:10px 0;display:flex;gap:10px;align-items:flex-start">' +
-        (d.photos && d.photos.length ? '<img class="fsDefPh" data-id="' + fsEsc(d.id) + '" src="' + d.photos[0] + '" style="width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid var(--fs-border);cursor:pointer;flex:none">' : '') +
+        (d.photos && d.photos.length ? '<div style="flex:none"><img class="fsDefPh" data-id="' + fsEsc(d.id) + '" src="' + d.photos[0] + '" style="width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid var(--fs-border);cursor:pointer;display:block">' +
+          (d.photos.length > 1 ? '<div style="font-size:10px;color:var(--fs-sub2);text-align:center;margin-top:2px">' + d.photos.length + ' photos</div>' : '') + '</div>' : '') +
         '<div style="flex:1"><div style="font-size:14px;font-weight:600">' + fsEsc(d.desc) + '</div>' +
         '<div style="font-size:12px;color:var(--fs-sub2)">' + fsEsc((d.created || "").slice(0, 10)) + ' &middot; ' + fsEsc(d.source || "") + (d.lastSeen ? ' &middot; <span style="color:#c62828">still failing ' + fsEsc(d.lastSeen) + '</span>' : '') + '</div>' +
         (d.action ? '<div style="font-size:12px;color:var(--fs-sub);margin-top:3px">Action: ' + fsEsc(d.action) + '</div>' : '') +
@@ -10173,7 +10321,11 @@ function fsRenderTab() {
           '</div>' : '') +
         (d.qid ? '<div style="margin-top:5px"><a class="fsDefWs" data-id="' + fsEsc(d.id) + '" style="color:var(--fs-accent);cursor:pointer;font-size:12px;font-weight:700">&#128205; Show me this on the plan</a></div>' : '') +
         '</div>' +
-        '<button class="fsbtn fsDefFix" data-id="' + fsEsc(d.id) + '" style="color:#1b8a3f;font-weight:700">&#10003; Rectified</button></div>';
+        '<div style="display:flex;flex-direction:column;gap:4px;flex:none">' +
+        '<button class="fsbtn fsDefFix" data-id="' + fsEsc(d.id) + '" style="color:#1b8a3f;font-weight:700">&#10003; Rectified</button>' +
+        '<button class="fsbtn fsDefPhAdd" data-id="' + fsEsc(d.id) + '" style="font-size:11.5px;padding:3px 8px">&#128247; Photo</button>' +
+        '<button class="fsbtn fsDefDel" data-id="' + fsEsc(d.id) + '" style="font-size:11.5px;padding:3px 8px;color:#c62828">Delete</button>' +
+        '</div></div>';
     });
     if (closed.length) {
       html += '<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--fs-sub);font-size:13.5px">' + closed.length + ' rectified</summary>';
@@ -10368,6 +10520,46 @@ function fsRenderTab() {
   if (fsTab === "defects") {
     const addB = document.getElementById("fsDefAddBtn");
     if (addB) addB.onclick = () => fsDefFormOpen(s, {});
+    /* Uptick will not let a technician remove their own mistake - it is
+       office-only, and it is the clearest own-goal in the market. We allow it,
+       with the two guards Uptick would also need. */
+    document.querySelectorAll(".fsDefDel").forEach(bn => bn.onclick = () => {
+      const d = (s.defects || []).filter(x => x.id === bn.dataset.id)[0];
+      if (!d) return;
+      const q = ((fsRegister && fsRegister.quotes) || []).filter(x => x.defectId === d.id)[0];
+      if (q) {
+        alert("This defect has a quote against it (" + (q.number || "a draft") + ").\n\n" +
+          "Delete the quote first — otherwise the quote is left pointing at nothing.");
+        return;
+      }
+      const fromTest = /test$/i.test(String(d.source || ""));
+      if (!confirm("Delete this defect?\n\n" + d.desc +
+        (fromTest ? "\n\nIt was raised by a failed test, so it will come back the next time that item fails." : "") +
+        "\n\nThis cannot be undone.")) return;
+      s.defects.splice(s.defects.indexOf(d), 1);
+      fsMarkDirty(); fsRenderSite();
+    });
+    document.querySelectorAll(".fsDefPhAdd").forEach(bn => bn.onclick = () => {
+      const d = (s.defects || []).filter(x => x.id === bn.dataset.id)[0];
+      if (!d) return;
+      fsDefPhotoTarget = d;
+      document.getElementById("fsDefMorePhoto").click();
+    });
+    document.querySelectorAll(".fsDefPh").forEach(im => im.onclick = () => {
+      const d = (s.defects || []).filter(x => x.id === im.dataset.id)[0];
+      if (!d || !d.photos || !d.photos.length) return;
+      let i = 0;
+      if (d.photos.length > 1) {
+        const p = prompt("This defect has " + d.photos.length + " photos. Which one? (1-" + d.photos.length + ")", "1");
+        if (p === null) return;
+        i = Math.min(d.photos.length - 1, Math.max(0, (parseInt(p, 10) || 1) - 1));
+      }
+      if (!confirm("Mark up this photo?\n\nOK to draw on it, Cancel to just look at it.")) {
+        fsViewPhoto(d.photos[i]);
+        return;
+      }
+      fsAnnOpen(d.photos[i], out => { d.photos[i] = out; fsMarkDirty(); fsRenderSite(); });
+    });
     document.querySelectorAll(".fsDefWs").forEach(bn => bn.onclick = () => {
       const d = (s.defects || []).filter(x => x.id === bn.dataset.id)[0];
       if (d) fsDefShowInWorkspace(d);
