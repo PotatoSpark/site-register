@@ -171,7 +171,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.23 (fs 1.21)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.24 (fs 1.22)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -7971,6 +7971,167 @@ document.getElementById("fsDashBtn").onclick = async () => {
 }));
 
 
+
+/* ===== Starter remedy-task libraries =========================================
+   Names and rough times ONLY - no parts, no prices. Neither Reece nor Claude
+   can verify a parts mapping, and a confident-looking wrong one would get
+   copied into every quote built on it, so we do not ship one.
+
+   THE MINUTES ARE UNVERIFIED STARTING POINTS, NOT MEASURED FIGURES. They exist
+   so the suggestion machinery has something to work from. Everything loaded
+   here is editable, renameable and deletable, the app shows the suggestion in
+   grey, and a human confirms it before it counts.
+
+   Structured by discipline like FS_EQUIP_LIBS - fire is the first vertical,
+   not the definition of the app. */
+const FS_TASK_LIBS = [
+  { key: "fire", label: "Fire", tasks: [
+    ["Replace smoke detector", 30],
+    ["Replace heat detector", 30],
+    ["Replace multi-criteria detector", 30],
+    ["Replace detector base", 20],
+    ["Clean and re-test detector", 15],
+    ["Replace aspirating detector filter", 30],
+    ["Replace manual call point", 30],
+    ["Replace manual call point element", 10],
+    ["Replace sounder", 30],
+    ["Replace strobe / visual alarm device", 30],
+    ["Replace panel battery set", 45],
+    ["Replace panel main board", 120],
+    ["Replace zone module / loop card", 60],
+    ["Investigate and repair zone fault", 120],
+    ["Investigate and repair earth fault", 120],
+    ["Replace end-of-line resistor", 20],
+    ["Re-terminate loop wiring", 45],
+    ["Replace door holder / magnetic release", 30],
+    ["Replace exit sign", 30],
+    ["Replace emergency light fitting", 30],
+    ["Replace emergency light battery", 20],
+    ["Replace emergency light control gear", 30],
+    ["Re-lamp emergency fitting", 15],
+    ["Replace exit sign legend / diffuser", 15],
+    ["Replace fire extinguisher", 15],
+    ["Recharge fire extinguisher", 30],
+    ["Pressure test fire extinguisher", 30],
+    ["Replace extinguisher hose", 10],
+    ["Replace extinguisher head / valve", 20],
+    ["Replace extinguisher bracket", 15],
+    ["Replace extinguisher location sign", 10],
+    ["Replace hose reel", 90],
+    ["Replace hose reel hose", 45],
+    ["Replace hose reel nozzle", 10],
+    ["Repair hose reel leak", 45],
+    ["Replace hose reel guide arm", 30],
+    ["Replace hose reel sign", 10],
+    ["Replace hydrant valve", 60],
+    ["Replace hydrant cap / blank", 15],
+    ["Repair hydrant leak", 60],
+    ["Replace booster inlet valve", 60],
+    ["Replace booster cabinet lock", 20],
+    ["Replace booster sign / block plan", 30],
+    ["Replace sprinkler head", 30],
+    ["Replace sprinkler escutcheon", 10],
+    ["Replace sprinkler guard", 10],
+    ["Replace flow switch", 60],
+    ["Replace valve tamper switch", 45],
+    ["Repair sprinkler valve leak", 90],
+    ["Replace pump battery", 45],
+    ["Service diesel fire pump", 180],
+    ["Replace pump pressure switch", 60],
+    ["Repair pump room leak", 90],
+    ["Replace fire door closer", 45],
+    ["Adjust and re-hang fire door", 60],
+    ["Replace fire door smoke seal", 30],
+    ["Replace intumescent seal", 30],
+    ["Replace fire door hardware set", 60],
+    ["Re-tag fire door", 10],
+    ["Repair fire-rated penetration seal", 45],
+    ["Replace EWIS speaker", 30],
+    ["Replace WIP handset", 30],
+    ["Replace EWIS amplifier", 90],
+    ["Investigate and repair speaker line fault", 120],
+    ["Replace warden intercom point", 45],
+    ["Replace suppression cylinder", 120],
+    ["Weigh and certify suppression cylinder", 45],
+    ["Replace release solenoid", 60],
+    ["Replace suppression signage", 15],
+    ["Attend and investigate fault", 60],
+    ["Isolate and re-instate system", 30],
+    ["Return visit to complete works", 60],
+  ] },
+  { key: "electrical", label: "Electrical", tasks: [
+    ["Replace RCD", 45],
+    ["Replace circuit breaker", 45],
+    ["Replace isolator", 45],
+    ["Replace power outlet", 30],
+    ["Replace three-phase outlet", 45],
+    ["Replace light switch", 20],
+    ["Replace luminaire", 30],
+    ["Re-lamp luminaire", 10],
+    ["Replace ballast / LED driver", 30],
+    ["Test and tag portable appliance", 5],
+    ["Repair damaged cable", 60],
+    ["Replace distribution board escutcheon", 45],
+    ["Thermal scan and tighten board terminations", 60],
+    ["Replace switchboard label set", 30],
+    ["Replace MEN link", 30],
+    ["Replace timeclock / contactor", 60],
+    ["Investigate and repair earth fault", 120],
+    ["Attend and investigate fault", 60],
+  ] },
+  { key: "firstaid", label: "First aid", tasks: [
+    ["Restock first aid kit", 15],
+    ["Replace first aid kit", 10],
+    ["Replace AED pads", 10],
+    ["Replace AED battery", 10],
+    ["Replace AED", 15],
+    ["Service eyewash station", 20],
+    ["Replace eyewash solution", 10],
+    ["Replace emergency shower head", 45],
+    ["Restock burns kit", 10],
+    ["Restock snake bite kit", 10],
+    ["Restock spill kit", 15],
+  ] },
+  { key: "grounds", label: "Grounds & property maintenance", tasks: [
+    ["Mow lawn area", 60],
+    ["Whipper snip edges", 30],
+    ["Weed garden beds", 45],
+    ["Prune hedge", 60],
+    ["Remove tree limb", 120],
+    ["Spray weeds", 45],
+    ["Repair irrigation line", 60],
+    ["Replace irrigation solenoid", 45],
+    ["Replace irrigation sprinkler head", 30],
+    ["Replace tap / water point", 45],
+    ["Clear green waste", 30],
+  ] },
+];
+
+function fsTaskLibFind(key) {
+  for (let i = 0; i < FS_TASK_LIBS.length; i++) if (FS_TASK_LIBS[i].key === key) return FS_TASK_LIBS[i];
+  return null;
+}
+/* Load a library into the book. Existing task NAMES are never duplicated and
+   never overwritten - someone who has already retimed "Replace smoke detector"
+   keeps their number. Returns what actually happened so the UI can say so. */
+function fsTaskLibLoad(key) {
+  const lib = fsTaskLibFind(key), b = fsBook();
+  if (!lib || !b) return { added: 0, skipped: 0 };
+  const have = Object.create(null);
+  b.tasks.forEach(t => { have[String(t.name || "").trim().toLowerCase()] = 1; });
+  let added = 0, skipped = 0;
+  lib.tasks.forEach(pair => {
+    const nm = pair[0];
+    if (have[nm.trim().toLowerCase()]) { skipped++; return; }
+    have[nm.trim().toLowerCase()] = 1;
+    b.tasks.push({ id: fsBookId("tk"), name: nm, baseMinutes: pair[1], components: [], lib: key });
+    added++;
+  });
+  return { added: added, skipped: skipped };
+}
+/* ===== end starter remedy-task libraries =================================== */
+
+
 /* ===== Pricebook =============================================================
    Reece's design, 27 Jul 2026. The catalogue ships with the ITEMS and none of
    the PRICES: there is no Australian task-price database to license, and each
@@ -8094,8 +8255,15 @@ function fsBookRender() {
   }
 
   if (fsBookTab === "tasks") {
-    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="flex:1;font-size:12.5px;color:var(--fs-sub2)">A remedy task is a job you do to fix a defect. The minutes are a starting point only — whoever prices the quote confirms them.</div>' +
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap"><div style="flex:1;min-width:180px;font-size:12.5px;color:var(--fs-sub2)">A remedy task is a job you do to fix a defect. The minutes are a starting point only — whoever prices the quote confirms them.</div>' +
+      '<button class="fsbtn" id="fsBookLoadTasks">&#128218; Load starter tasks</button>' +
       '<button class="fsbtnP" id="fsBookAddTask">&#65291; Add task</button></div>';
+    if (!b.tasks.length) {
+      html += '<div style="background:#15181b;border:1px solid var(--fs-border);border-radius:8px;padding:11px 13px;margin-bottom:10px;font-size:13px;color:var(--fs-sub)">' +
+        '<b style="color:#e8e8e8">Starting from scratch is the slow way.</b> Load a starter list for your trade and edit it — ' +
+        'rename anything worded differently to how you say it, change the times, delete what you would never quote. ' +
+        'Nothing in a starter list is fixed.</div>';
+    }
     if (!b.tasks.length) html += '<div style="color:var(--fs-faint);font-size:13.5px;padding:10px 0">No remedy tasks yet.</div>';
     b.tasks.forEach(t => {
       html += '<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--fs-border)">' +
@@ -8166,6 +8334,22 @@ function fsBookRender() {
   addBtn("fsBookAddItem", () => b.items.push({ id: fsBookId("pi"), code: "", name: "", category: "", unit: "ea", costCents: null, unitPriceCents: null, taxCode: "" }));
   addBtn("fsBookAddRate", () => b.labourRates.push({ id: fsBookId("lr"), name: "", rateCents: null, taxCode: "" }));
   addBtn("fsBookAddTask", () => b.tasks.push({ id: fsBookId("tk"), name: "", baseMinutes: null, components: [] }));
+  const loadT = document.getElementById("fsBookLoadTasks");
+  if (loadT) loadT.onclick = () => {
+    const lines = FS_TASK_LIBS.map((l, i) => "  " + (i + 1) + ". " + l.label + " (" + l.tasks.length + " tasks)").join("\n");
+    const pick = prompt("Load a starter task list:\n\n" + lines +
+      "\n\nThese are a DRAFT to edit, not a finished list. The times are rough starting points, " +
+      "not measured figures \u2014 change anything that is wrong for your trade.\n\nType a number:");
+    if (pick === null) return;
+    const lib = FS_TASK_LIBS[parseInt(pick, 10) - 1];
+    if (!lib) { alert("No list with that number."); return; }
+    const res = fsTaskLibLoad(lib.key);
+    alert("\u2713 " + lib.label + "\n\n" + res.added + " task" + (res.added === 1 ? "" : "s") + " added." +
+      (res.skipped ? "\n" + res.skipped + " already in your list and left exactly as you had " +
+       (res.skipped === 1 ? "it" : "them") + "." : "") +
+      "\n\nEdit or delete anything that does not match how you work.");
+    fsMarkDirty(); fsBookRender();
+  };
   const rst = document.getElementById("fsBkAccReset");
   if (rst) rst.onclick = () => { b.accessLevels = null; fsMarkDirty(); fsBookRender(); };
 
