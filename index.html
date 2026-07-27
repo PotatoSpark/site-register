@@ -171,7 +171,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.24 (fs 1.22)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.26 (fs 1.24)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -8382,6 +8382,362 @@ function fsBookRender() {
 /* ===== end pricebook ======================================================= */
 
 
+
+/* ===== Quotes - money layer pass 2 ==========================================
+   A quote is made HERE and lives in the register, so it works offline and
+   travels with the file. FireSpark owns the WORK; Xero or MYOB own the MONEY -
+   no tax rate is computed here and no payment is ever taken.
+
+   The number is allocated when the quote is SENT, not when it is started, so an
+   abandoned draft never burns a number. Format stays inside MYOB's box:
+   at most 5 leading letters, 13 characters total. */
+
+let fsQuoteId = null;      /* the quote currently open in the editor */
+let fsQuoteBack = "pipe";  /* where the back link returns to */
+
+const FS_QSTATUS = [
+  { k: "draft",    label: "Draft",    col: "#7a7a7a" },
+  { k: "sent",     label: "Sent",     col: "#b58900" },
+  { k: "approved", label: "Approved", col: "#1b8a3f" },
+  { k: "declined", label: "Declined", col: "#c62828" }
+];
+function fsQStat(q) {
+  const k = (q && q.status) || "draft";
+  for (let i = 0; i < FS_QSTATUS.length; i++) if (FS_QSTATUS[i].k === k) return FS_QSTATUS[i];
+  return FS_QSTATUS[0];
+}
+function fsQuotes() {
+  if (!fsRegister) return [];
+  fsRegister.quotes = fsRegister.quotes || [];
+  return fsRegister.quotes;
+}
+function fsQuoteFind(id) { return fsQuotes().filter(q => q.id === id)[0] || null; }
+
+/* Allocated at SEND. One-way up, and the seed is editable for anyone
+   continuing an existing sequence from another system. */
+function fsQuoteAllocNumber() {
+  const r = fsRegister;
+  if (!Number.isInteger(r.quoteSeq)) r.quoteSeq = 1000;
+  r.quoteSeq += 1;
+  const pre = String(r.quotePrefix == null ? "Q-" : r.quotePrefix);
+  return (pre + r.quoteSeq).slice(0, 13);
+}
+
+/* Start a quote from a defect. Captures the site and access difficulty at
+   creation so the quote reads correctly later even if the site is renamed. */
+function fsQuoteNew(row) {
+  const q = {
+    id: fsBookId("q"), number: "", status: "draft",
+    created: new Date().toISOString(), updated: new Date().toISOString(),
+    clientName: (row && row.client) || "", siteName: (row && row.site) || "",
+    where: (row && row.where) || "",
+    defectId: (row && row.d && row.d.id) || "", defectDesc: (row && row.d && row.d.desc) || "",
+    access: row ? fsAccessResolve(row.s, null, row.node) : "normal",
+    lines: [], lineAmountsInclusive: false, currency: "AUD", notes: "",
+    sentAt: null, approvedAt: null, declinedAt: null
+  };
+  fsQuotes().push(q);
+  return q;
+}
+
+/* Add a remedy task: its parts become lines, and ONE suggested labour line
+   goes on, adjusted for how hard this equipment is to reach. */
+function fsQuoteAddTask(q, taskId) {
+  const b = fsBook(), t = (b.tasks || []).filter(x => x.id === taskId)[0];
+  if (!t) return 0;
+  let n = 0;
+  (t.components || []).forEach(c => {
+    const ln = FSMoney.lineFromItem(c.itemId, q.clientName, b, c.qty == null ? 1 : c.qty);
+    if (ln) { ln.kind = "item"; ln.id = fsBookId("ql"); q.lines.push(ln); n++; }
+  });
+  const rate = (b.labourRates || [])[0];
+  const lab = FSMoney.labourLine(t, q.access, rate ? rate.id : "", b);
+  if (lab.minutes != null) { lab.id = fsBookId("ql"); lab.taskId = t.id; q.lines.push(lab); n++; }
+  q.updated = new Date().toISOString();
+  return n;
+}
+function fsQuoteAddItem(q, itemId) {
+  const ln = FSMoney.lineFromItem(itemId, q.clientName, fsBook(), 1);
+  if (!ln) return false;
+  ln.kind = "item"; ln.id = fsBookId("ql");
+  q.lines.push(ln); q.updated = new Date().toISOString();
+  return true;
+}
+function fsQuoteAddManual(q, desc) {
+  q.lines.push({ id: fsBookId("ql"), kind: "manual", description: desc, qty: 1,
+                 unitPriceCents: 0, taxCode: "" });
+  q.updated = new Date().toISOString();
+}
+
+/* What still stops this quote going out. Returned as a list so the UI can say
+   exactly what to fix rather than just disabling a button. */
+function fsQuoteBlockers(q) {
+  const out = [];
+  if (!q.lines.length) out.push("It has no lines yet.");
+  const unconf = q.lines.filter(l => l.kind === "labour" && l.suggested && !l.confirmed).length;
+  if (unconf) out.push(unconf + " labour line" + (unconf === 1 ? "" : "s") +
+    " still showing a suggested time. Confirm the minutes — the app will not guess for you.");
+  const unpriced = q.lines.filter(l => l.kind !== "manual" && !FSMoney.isCents(l.unitPriceCents ? l.unitPriceCents : 0) ||
+    (l.kind === "item" && l.priceSource === "none") || (l.kind === "labour" && l.priced === false)).length;
+  if (unpriced) out.push(unpriced + " line" + (unpriced === 1 ? " has" : "s have") +
+    " no price in the pricebook. Fill the price in, or price the line here.");
+  return out;
+}
+function fsQuoteTotals(q) {
+  /* No tax table is supplied on purpose - this app does not know GST rates and
+     must never invent one. computeDoc reports taxKnown:false and we say so. */
+  return FSMoney.computeDoc({ lines: q.lines, lineAmountsInclusive: !!q.lineAmountsInclusive }, null);
+}
+
+/* Status flows one way through the defect too, so the nag list is never out of
+   step with reality. */
+function fsQuoteSetStatus(q, k) {
+  q.status = k;
+  q.updated = new Date().toISOString();
+  const now = q.updated;
+  if (k === "sent") { if (!q.number) q.number = fsQuoteAllocNumber(); q.sentAt = now; }
+  if (k === "approved") q.approvedAt = now;
+  if (k === "declined") q.declinedAt = now;
+  const map = { draft: null, sent: "quoted", approved: "approved", declined: "declined" };
+  const d = fsQuoteDefect(q);
+  if (d) {
+    d.quoteStatus = map[k] || null;
+    d.quoteAt = now;
+    d.quoteBy = fsPipeWho();
+    if (q.number) d.quoteRef = q.number;
+  }
+}
+function fsQuoteDefect(q) {
+  let found = null;
+  ((fsRegister || {}).clients || []).forEach(c => (c.sites || []).forEach(s => {
+    const w = n => {
+      (n.defects || []).forEach(d => { if (d.id === q.defectId) found = d; });
+      (n.buildings || []).forEach(w);
+    };
+    w(s);
+  }));
+  return found;
+}
+
+/* ---------------------------------------------------------------- the list */
+function fsQuoteListRender() {
+  const wrap = document.getElementById("fsDashView");
+  const qs = fsQuotes().slice().sort((a, b) => String(b.created).localeCompare(String(a.created)));
+  let html = '<div style="margin-bottom:12px"><a id="fsQlBack" class="fsCrumb">&#8592; Portfolio dashboard</a></div>';
+  html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">' +
+    '<h2 style="font-size:20px;flex:1;min-width:150px">&#128195; Quotes</h2>' +
+    '<button class="fsbtn" id="fsQlSeq">&#128290; Numbering</button></div>';
+  html += '<div class="fscard" style="padding:4px 14px">';
+  if (!qs.length) html += '<div style="color:var(--fs-faint);font-size:13.5px;padding:14px 0">No quotes yet. Start one from a defect on the Defect pipeline.</div>';
+  qs.forEach((q, i) => {
+    const st = fsQStat(q), tot = fsQuoteTotals(q);
+    html += '<div class="fsQlRow" data-id="' + fsEsc(q.id) + '" style="display:flex;gap:10px;align-items:center;padding:10px 0;' + (i ? 'border-top:1px solid var(--fs-border);' : '') + 'cursor:pointer">' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="font-size:14px;font-weight:600">' + fsEsc(q.number || "Draft") + ' &middot; ' + fsEsc(q.defectDesc || "(no defect)") + '</div>' +
+        '<div style="font-size:12px;color:var(--fs-sub2)">' + fsEsc(q.siteName) + (q.where ? ' &middot; ' + fsEsc(q.where) : '') +
+        ' &middot; ' + fsEsc(String(q.created).slice(0, 10)) + ' &middot; ' + q.lines.length + ' line' + (q.lines.length === 1 ? '' : 's') + '</div></div>' +
+      '<span style="font-size:13px;font-weight:700;color:var(--fs-sub)">' + fsEsc(FSMoney.fmt(tot.subtotalCents)) + '</span>' +
+      '<span style="font-size:11px;font-weight:800;color:#fff;background:' + st.col + ';border-radius:11px;padding:2px 9px;flex:none">' + fsEsc(st.label) + '</span></div>';
+  });
+  html += '</div>';
+  wrap.innerHTML = html;
+  document.getElementById("fsQlBack").onclick = () => { fsDashMode = "sites"; fsDashRender(); };
+  document.getElementById("fsQlSeq").onclick = () => {
+    const r = fsRegister;
+    const cur = Number.isInteger(r.quoteSeq) ? r.quoteSeq : 1000;
+    const p = prompt("Quote number prefix (up to 5 letters — MYOB will not accept more):", r.quotePrefix == null ? "Q-" : r.quotePrefix);
+    if (p === null) return;
+    const n = prompt("Next quote number will be one MORE than this.\n\nSet it to continue a sequence you already use. It can only go UP.", String(cur));
+    if (n === null) return;
+    const v = parseInt(n, 10);
+    if (!isFinite(v)) { alert("That is not a number."); return; }
+    if (v < cur) { alert("The counter can only go up. It is currently " + cur + "."); return; }
+    r.quotePrefix = String(p).slice(0, 5);
+    r.quoteSeq = v;
+    fsMarkDirty(); fsQuoteListRender();
+  };
+  wrap.querySelectorAll(".fsQlRow").forEach(el => el.onclick = () => {
+    fsQuoteId = el.dataset.id; fsQuoteBack = "list"; fsDashMode = "quote"; fsQuoteRender();
+  });
+}
+
+/* -------------------------------------------------------------- the editor */
+function fsQuoteRender() {
+  const wrap = document.getElementById("fsDashView");
+  const q = fsQuoteFind(fsQuoteId);
+  if (!q) { fsDashMode = "quotes"; return fsQuoteListRender(); }
+  const b = fsBook(), st = fsQStat(q), tot = fsQuoteTotals(q), blockers = fsQuoteBlockers(q);
+  const locked = q.status !== "draft";
+
+  let html = '<div style="margin-bottom:12px"><a id="fsQBack" class="fsCrumb">&#8592; ' +
+    (fsQuoteBack === "list" ? 'Quotes' : 'Defect pipeline') + '</a></div>';
+  html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">' +
+    '<h2 style="font-size:20px;flex:1;min-width:150px">' + fsEsc(q.number || "New quote") + '</h2>' +
+    '<span style="font-size:11px;font-weight:800;color:#fff;background:' + st.col + ';border-radius:11px;padding:2px 10px">' + fsEsc(st.label) + '</span></div>';
+
+  html += '<div class="fscard" style="padding:14px;margin-bottom:10px">' +
+    '<div style="font-size:14px;font-weight:600">' + fsEsc(q.defectDesc || "(no defect attached)") + '</div>' +
+    '<div style="font-size:12px;color:var(--fs-sub2);margin-top:3px">' + fsEsc(q.siteName) +
+      (q.where ? ' &middot; ' + fsEsc(q.where) : '') + (q.clientName ? ' &middot; ' + fsEsc(q.clientName) : '') + '</div>' +
+    '<div style="font-size:12px;color:var(--fs-sub2);margin-top:3px">Access at this site: <b>' +
+      fsEsc(FSMoney.accessLevel(q.access, b).label) + '</b> &mdash; suggested times are scaled by this.</div></div>';
+
+  if (!locked) {
+    html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">' +
+      '<button class="fsbtnP" id="fsQAddTask">&#65291; Add remedy task</button>' +
+      '<button class="fsbtn" id="fsQAddItem">&#65291; Add item</button>' +
+      '<button class="fsbtn" id="fsQAddManual">&#65291; Add a line by hand</button></div>';
+  }
+
+  html += '<div class="fscard" style="padding:4px 14px">';
+  if (!q.lines.length) html += '<div style="color:var(--fs-faint);font-size:13.5px;padding:14px 0">Nothing on this quote yet. Add a remedy task &mdash; it brings its parts and a suggested labour time with it.</div>';
+  q.lines.forEach((l, i) => {
+    const isLab = l.kind === "labour";
+    const needsConfirm = isLab && l.suggested && !l.confirmed;
+    const unpriced = (l.kind === "item" && l.priceSource === "none") || (isLab && l.priced === false);
+    const lineCents = FSMoney.roundHalfUp((l.unitPriceCents || 0) * (l.qty == null ? 1 : l.qty));
+    html += '<div style="padding:10px 0;' + (i ? 'border-top:1px solid var(--fs-border);' : '') + '">' +
+      '<div style="display:flex;gap:10px;align-items:flex-start">' +
+        '<div style="flex:1;min-width:0">' +
+          '<div style="font-size:13.5px;font-weight:600">' + fsEsc(l.description || "(no description)") + '</div>' +
+          '<div style="font-size:11.5px;color:var(--fs-sub2);margin-top:2px">' +
+            (isLab
+              ? (l.minutes == null ? 'no time set' : l.minutes + ' min' +
+                 (l.basis && l.basis.accessPct !== 100 ? ' (' + l.basis.baseMinutes + ' min &times; ' + fsEsc(l.basis.accessLabel) + ' ' + l.basis.accessPct + '%)' : ''))
+              : (l.qty == null ? 1 : l.qty) + ' &times; ' + (FSMoney.isCents(l.unitPriceCents) && !unpriced ? fsEsc(FSMoney.fmt(l.unitPriceCents)) : '—')) +
+          '</div>' +
+          (needsConfirm ? '<div style="margin-top:5px"><span style="font-size:11.5px;color:#b58900;font-weight:700">Suggested time — not confirmed</span> ' +
+            (locked ? '' : '<a class="fsQConf" data-id="' + fsEsc(l.id) + '" style="color:var(--fs-accent);cursor:pointer;font-size:12px;font-weight:700;margin-left:6px">Confirm or change</a>') + '</div>' : '') +
+          (l.confirmed && l.adjusted ? '<div style="font-size:11px;color:var(--fs-sub2);margin-top:3px">changed from the suggested ' + l.suggestedMinutes + ' min</div>' : '') +
+          (unpriced ? '<div style="font-size:11.5px;color:#c62828;margin-top:4px">No price in the pricebook</div>' : '') +
+        '</div>' +
+        '<span style="width:86px;text-align:right;font-size:13.5px;font-weight:700;color:' + (unpriced || needsConfirm ? 'var(--fs-faint)' : '#e8e8e8') + '">' +
+          (unpriced ? '—' : fsEsc(FSMoney.fmt(lineCents))) + '</span>' +
+        (locked ? '' : '<a class="fsQDel" data-id="' + fsEsc(l.id) + '" style="width:24px;text-align:center;color:#c62828;cursor:pointer">&#10005;</a>') +
+      '</div></div>';
+  });
+  html += '</div>';
+
+  html += '<div class="fscard" style="padding:14px;margin-top:10px">' +
+    '<div style="display:flex;gap:10px;align-items:center"><span style="flex:1;font-size:14px;font-weight:700">Total excluding tax</span>' +
+    '<span style="font-size:18px;font-weight:800">' + fsEsc(FSMoney.fmt(tot.subtotalCents)) + '</span></div>' +
+    '<div style="font-size:11.5px;color:var(--fs-faint);margin-top:6px">GST is not calculated here. FireSpark records the work; your accounting system applies the tax. Send the quote to Xero or MYOB and it will use your own tax codes.</div></div>';
+
+  if (blockers.length && !locked) {
+    html += '<div style="background:#2b2718;border:1px solid #b58900;border-radius:8px;padding:10px 13px;margin-top:10px;font-size:13px;color:#ffd873">' +
+      '<b>Before this can be sent</b><ul style="margin:6px 0 0 18px;padding:0">' +
+      blockers.map(x => '<li style="margin-bottom:3px">' + fsEsc(x) + '</li>').join('') + '</ul></div>';
+  }
+
+  html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">';
+  if (q.status === "draft") html += '<button class="fsbtnP" id="fsQSend"' + (blockers.length ? ' disabled style="opacity:.45"' : '') + '>Mark as sent</button>';
+  if (q.status === "sent") {
+    html += '<button class="fsbtnP" id="fsQApprove">&#10003; Approved</button>' +
+            '<button class="fsbtn" id="fsQDecline">Declined</button>';
+  }
+  html += '<button class="fsbtn" id="fsQPdf">&#128196; PDF</button>' +
+          '<button class="fsbtn" id="fsQDel2" style="color:#c62828">Delete quote</button></div>';
+  wrap.innerHTML = html;
+
+  document.getElementById("fsQBack").onclick = () => {
+    if (fsQuoteBack === "list") { fsDashMode = "quotes"; fsQuoteListRender(); }
+    else { fsDashMode = "pipeline"; fsPipeRender(); }
+  };
+
+  const pick = (title, list, fn) => {
+    if (!list.length) { alert("Nothing in the pricebook to add yet.\n\nOpen the Pricebook and add some first."); return; }
+    const lines = list.slice(0, 60).map((x, i) => "  " + (i + 1) + ". " + x.name).join("\n");
+    const p = prompt(title + "\n\n" + lines + (list.length > 60 ? "\n  … and " + (list.length - 60) + " more" : "") + "\n\nType a number:");
+    if (p === null) return;
+    const x = list[parseInt(p, 10) - 1];
+    if (!x) { alert("No entry with that number."); return; }
+    fn(x);
+    fsMarkDirty(); fsQuoteRender();
+  };
+  const addT = document.getElementById("fsQAddTask");
+  if (addT) addT.onclick = () => pick("Add a remedy task:", (b.tasks || []).filter(t => t.name), t => {
+    const n = fsQuoteAddTask(q, t.id);
+    if (!n) alert("That task has no parts and no time set, so nothing was added.\n\nGive it a time in the Pricebook first.");
+  });
+  const addI = document.getElementById("fsQAddItem");
+  if (addI) addI.onclick = () => pick("Add an item:", (b.items || []).filter(x => x.name), x => fsQuoteAddItem(q, x.id));
+  const addM = document.getElementById("fsQAddManual");
+  if (addM) addM.onclick = () => {
+    const d = prompt("Describe the line:");
+    if (d === null || !String(d).trim()) return;
+    fsQuoteAddManual(q, String(d).trim());
+    fsMarkDirty(); fsQuoteRender();
+  };
+
+  wrap.querySelectorAll(".fsQConf").forEach(a => a.onclick = () => {
+    const l = q.lines.filter(x => x.id === a.dataset.id)[0];
+    if (!l) return;
+    const m = prompt("How many minutes will this actually take?\n\nSuggested: " + l.suggestedMinutes +
+      " min" + (l.basis && l.basis.accessPct !== 100 ? " (" + l.basis.baseMinutes + " min base, scaled for " + l.basis.accessLabel + ")" : "") +
+      "\n\nChange it if the job is harder or easier than that.", String(l.suggestedMinutes == null ? "" : l.suggestedMinutes));
+    if (m === null) return;
+    const v = String(m).trim() === "" ? null : Number(m);
+    if (v != null && (!isFinite(v) || v < 0)) { alert("That is not a number of minutes."); return; }
+    try { FSMoney.confirmLabour(l, v); } catch (e) { alert("That is not a valid time."); return; }
+    fsMarkDirty(); fsQuoteRender();
+  });
+  wrap.querySelectorAll(".fsQDel").forEach(a => a.onclick = () => {
+    const l = q.lines.filter(x => x.id === a.dataset.id)[0];
+    if (!l) return;
+    if (!confirm("Remove this line?\n\n" + (l.description || ""))) return;
+    q.lines.splice(q.lines.indexOf(l), 1);
+    fsMarkDirty(); fsQuoteRender();
+  });
+
+  const send = document.getElementById("fsQSend");
+  if (send) send.onclick = () => {
+    const bl = fsQuoteBlockers(q);
+    if (bl.length) { alert("Not ready to send:\n\n" + bl.join("\n")); return; }
+    if (!confirm("Mark this quote as sent?\n\nIt gets its quote number now, the lines lock, and the defect shows as Quoted.")) return;
+    fsQuoteSetStatus(q, "sent");
+    fsMarkDirty(); fsQuoteRender();
+    alert("✓ " + q.number + "\n\nSave the PDF and send it from your own email. FireSpark does not send anything on your behalf.");
+  };
+  const app = document.getElementById("fsQApprove");
+  if (app) app.onclick = () => { fsQuoteSetStatus(q, "approved"); fsMarkDirty(); fsQuoteRender(); };
+  const dec = document.getElementById("fsQDecline");
+  if (dec) dec.onclick = () => { fsQuoteSetStatus(q, "declined"); fsMarkDirty(); fsQuoteRender(); };
+  document.getElementById("fsQPdf").onclick = () => fsQuotePdf(q);
+  document.getElementById("fsQDel2").onclick = () => {
+    if (!confirm("Delete this quote?\n\nThe defect goes back to not quoted. The defect itself is not touched.")) return;
+    const d = fsQuoteDefect(q);
+    if (d) { d.quoteStatus = null; d.quoteRef = ""; }
+    const arr = fsQuotes();
+    arr.splice(arr.indexOf(q), 1);
+    fsQuoteId = null; fsMarkDirty();
+    fsDashMode = "quotes"; fsQuoteListRender();
+  };
+}
+
+function fsQuotePdf(q) {
+  const tot = fsQuoteTotals(q);
+  const L = [["h", "Quote " + (q.number || "(draft)")]];
+  L.push(["t", (q.clientName ? q.clientName + " — " : "") + q.siteName + (q.where ? " — " + q.where : "")]);
+  L.push(["t", "Date: " + String(q.created).slice(0, 10) + "    Status: " + fsQStat(q).label]);
+  L.push(["b", "Defect"]);
+  L.push(["t", q.defectDesc || "(none recorded)"]);
+  L.push(["b", "Work to be carried out"]);
+  q.lines.forEach(l => {
+    const cents = FSMoney.roundHalfUp((l.unitPriceCents || 0) * (l.qty == null ? 1 : l.qty));
+    const un = (l.kind === "item" && l.priceSource === "none") || (l.kind === "labour" && l.priced === false);
+    L.push(["t", "  " + (l.description || "") +
+      (l.kind === "labour" && l.minutes != null ? "  (" + l.minutes + " min)" : "") +
+      "   " + (un ? "price not set" : FSMoney.fmt(cents))]);
+  });
+  L.push(["b", "Total excluding tax: " + FSMoney.fmt(tot.subtotalCents)]);
+  L.push(["t", "GST is applied by our accounting system and shown on the tax invoice."]);
+  if (q.notes) { L.push(["b", "Notes"]); String(q.notes).split("\n").forEach(x => L.push(["t", x])); }
+  fsLinesPdf(L, fsDocBrand() + " quote " + (q.number || "draft"),
+    "quote-" + (q.number || "draft") + ".pdf");
+}
+/* ===== end quotes ========================================================== */
+
+
 /* ===== Defect pull-through pipeline =========================================
    A defect only earns anything once it becomes a quote. Everything below ages
    the OPEN defects and surfaces the ones that have gone quiet, so none of them
@@ -8389,7 +8745,9 @@ function fsBookRender() {
    accounting system, not in this app, and technicians never see one.
    Industry term for this is "pull-through". */
 let fsDashMode = "sites";          /* "sites" | "pipeline" */
-let fsPipeUnquotedOnly = true;
+let fsPipeFilterK = "all";     /* "all" | "" (not quoted) | quoted | approved | declined
+                                  Defaults to ALL. A row must never disappear
+                                  because of a filter the user did not choose. */
 let fsMsWho = "";                  /* signed-in UPN, cached opportunistically */
 
 const FS_QSTATES = [
@@ -8428,6 +8786,11 @@ function fsDefBucket(days) {
    it just is not an AUTHORISATION today. When Stage 3 lands, this is the one
    function that changes - swap the cached UPN for a real role lookup. */
 function fsPipeWho() { return fsMsWho || ""; }
+/* The quote already raised against this defect, if any. */
+function fsPipeQuoteOf(d) {
+  if (!d || !fsRegister) return null;
+  return ((fsRegister.quotes) || []).filter(q => q.defectId === d.id)[0] || null;
+}
 
 /* Every OPEN defect in the register with enough context to act on it.
    Recurses buildings because a building holds its own defects. */
@@ -8505,7 +8868,8 @@ function fsPipeDigest(rows, now) {
 function fsPipeRender() {
   const wrap = document.getElementById("fsDashView");
   const all = fsPipeRows(fsRegister);
-  const rows = fsPipeUnquotedOnly ? all.filter(r => !r.d.quoteStatus) : all;
+  const rows = fsPipeFilterK === "all" ? all
+    : all.filter(r => (r.d.quoteStatus || "") === fsPipeFilterK);
   const unq = all.filter(r => !r.d.quoteStatus);
   const aged = unq.filter(r => r.days != null && r.days > 90);
   let html = '<div style="margin-bottom:12px"><a id="fsPipeBack" class="fsCrumb">&#8592; Portfolio dashboard</a></div>';
@@ -8518,8 +8882,16 @@ function fsPipeRender() {
     chip(all.length, "Open defects", all.length ? "#c62828" : "#1b8a3f") +
     chip(unq.length, "Not quoted", unq.length ? "#b58900" : "#1b8a3f") +
     chip(aged.length, "Unquoted over 90d", aged.length ? "#c62828" : "#1b8a3f") + '</div>';
-  html += '<label style="display:flex;gap:8px;align-items:center;cursor:pointer;margin-bottom:10px;font-size:13.5px">' +
-    '<input type="checkbox" id="fsPipeFilter"' + (fsPipeUnquotedOnly ? ' checked' : '') + '> Show only defects that have not been quoted</label>';
+  /* Visible, counted filters. The user can always see WHY a row is not on
+     screen, and can always get back to it. */
+  const fCounts = { all: all.length };
+  FS_QSTATES.forEach(q => { fCounts[q.k] = all.filter(r => (r.d.quoteStatus || "") === q.k).length; });
+  const chipF = (k, label, col) => '<a class="fsPipeF" data-k="' + fsEsc(k) + '" style="cursor:pointer;padding:5px 11px;border-radius:14px;font-size:12.5px;font-weight:700;' +
+    (fsPipeFilterK === k ? 'background:' + col + ';color:#101214' : 'background:#1a1d21;color:var(--fs-sub)') + '">' +
+    fsEsc(label) + ' ' + (fCounts[k] || 0) + '</a>';
+  html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">' +
+    chipF("all", "All open", "var(--fs-accent)") +
+    FS_QSTATES.map(q => chipF(q.k, q.label, q.col)).join('') + '</div>';
   html += '<div class="fscard" style="padding:4px 14px">';
   if (!rows.length) {
     html += '<div style="color:var(--fs-faint);font-size:13.5px;padding:14px 0">' +
@@ -8539,15 +8911,30 @@ function fsPipeRender() {
           (r.d.quoteAt ? '<span style="font-size:11px;color:var(--fs-faint)">set ' + fsEsc(String(r.d.quoteAt).slice(0, 10)) +
              (r.d.quoteBy ? ' by ' + fsEsc(r.d.quoteBy) : '') + '</span>' : '') +
         '</div></div>' +
+      '<button class="fsPipeQuote fsbtn" data-i="' + i + '" style="flex:none;font-size:12px;padding:5px 9px">' +
+        (fsPipeQuoteOf(r.d) ? 'Open quote' : 'Quote this') + '</button>' +
       '<select class="fsPipeQs" data-i="' + i + '" style="background:#1a1d21;border:1px solid ' + qs.col + ';border-radius:6px;color:' + qs.col + ';font-weight:700;padding:5px 7px;font-size:12.5px;flex:none">' +
         FS_QSTATES.map(q => '<option value="' + q.k + '"' + (q.k === qs.k ? ' selected' : '') + '>' + q.label + '</option>').join('') +
       '</select></div>';
   });
   html += '</div>';
-  html += '<div style="margin-top:10px;font-size:11.5px;color:var(--fs-faint)">Status only — no prices are stored in this app. Technicians see the status on the site Defects tab but cannot change it here.</div>';
+  html += '<div style="margin-top:10px;padding:10px 12px;background:#15181b;border:1px solid var(--fs-border);border-radius:8px;font-size:12px;color:var(--fs-sub)">' +
+    '<b style="color:#e8e8e8">What the status means right now.</b> Quotes are not built yet, so this is a <b>manual marker</b> — ' +
+    'you set it to record that a quote was raised somewhere else, in your accounting system or by email. ' +
+    'It is here so nothing rots unnoticed while the quote screen is being built. ' +
+    'Changing it never moves a row off this screen unless you have picked a filter above.' +
+    '<br><br>Status only — no prices are stored in this app, and technicians can see the status on the site Defects tab but cannot change it.</div>';
   wrap.innerHTML = html;
   document.getElementById("fsPipeBack").onclick = () => { fsDashMode = "sites"; fsDashRender(); };
-  document.getElementById("fsPipeFilter").onchange = e => { fsPipeUnquotedOnly = !!e.target.checked; fsPipeRender(); };
+  wrap.querySelectorAll(".fsPipeF").forEach(a => a.onclick = () => { fsPipeFilterK = a.dataset.k; fsPipeRender(); });
+  wrap.querySelectorAll(".fsPipeQuote").forEach(bn => bn.onclick = () => {
+    const r = rows[+bn.dataset.i];
+    if (!r) return;
+    const ex = fsPipeQuoteOf(r.d);
+    const q = ex || fsQuoteNew(r);
+    fsQuoteId = q.id; fsQuoteBack = "pipe"; fsDashMode = "quote";
+    fsMarkDirty(); fsQuoteRender();
+  });
   document.getElementById("fsPipeCsvBtn").onclick = () => {
     deliverFile(new Blob([fsPipeCsv(all)], { type: "text/csv" }),
       "defect-pipeline-" + new Date().toISOString().slice(0, 10) + ".csv", "text/csv");
@@ -8600,6 +8987,8 @@ function fsDashRows() {
 function fsDashRender() {
   if (fsDashMode === "pipeline") return fsPipeRender();
   if (fsDashMode === "book") return fsBookRender();
+  if (fsDashMode === "quotes") return fsQuoteListRender();
+  if (fsDashMode === "quote") return fsQuoteRender();
   const wrap = document.getElementById("fsDashView");
   const rows = fsDashRows();
   const over = rows.filter(r => r.days !== null && r.days < 0).length;
@@ -8607,7 +8996,7 @@ function fsDashRender() {
   const defs = rows.reduce((a, r) => a + r.def, 0);
   let html = '<div style="margin-bottom:12px"><a id="fsDashBack" class="fsCrumb">&#8592; Clients</a></div>';
   html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px"><h2 style="font-size:20px;flex:1;min-width:150px">&#128202; Portfolio dashboard</h2>' +
-    '<button class="fsbtn" id="fsPipeBtn">&#129518; Defect pipeline</button><button class="fsbtn" id="fsBookBtn">&#128176; Pricebook</button><button class="fsbtn" id="fsDashPdf">&#128196; PDF</button></div>';
+    '<button class="fsbtn" id="fsPipeBtn">&#129518; Defect pipeline</button><button class="fsbtn" id="fsQuotesBtn">&#128195; Quotes</button><button class="fsbtn" id="fsBookBtn">&#128176; Pricebook</button><button class="fsbtn" id="fsDashPdf">&#128196; PDF</button></div>';
   const chip = (n, lbl, col) => '<div class="fscard" style="flex:1;min-width:110px;padding:12px;text-align:center"><div style="font-size:24px;font-weight:800;color:' + col + '">' + n + '</div><div style="font-size:11.5px;color:var(--fs-sub2)">' + lbl + '</div></div>';
   html += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">' + chip(over, "Overdue", over ? "#c62828" : "#1b8a3f") + chip(soon, "Due within 30 days", soon ? "#b58900" : "#1b8a3f") + chip(defs, "Open defects", defs ? "#c62828" : "#1b8a3f") + '</div>';
   html += '<div class="fscard" style="padding:4px 14px">';
@@ -8625,6 +9014,7 @@ function fsDashRender() {
   document.getElementById("fsDashPdf").onclick = fsDashPdf;
   document.getElementById("fsPipeBtn").onclick = () => { fsDashMode = "pipeline"; fsPipeRender(); };
   document.getElementById("fsBookBtn").onclick = () => { fsDashMode = "book"; fsBookRender(); };
+  document.getElementById("fsQuotesBtn").onclick = () => { fsDashMode = "quotes"; fsQuoteListRender(); };
   wrap.querySelectorAll(".fsDashRow").forEach(el => el.onclick = () => {
     const r = rows[+el.dataset.i];
     if (!r) return;
