@@ -171,7 +171,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.27 (fs 1.25)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.28 (fs 1.26)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -8174,6 +8174,333 @@ function fsTaskLibLoad(key) {
 /* ===== end starter remedy-task libraries =================================== */
 
 
+/* ===== Accounting handoff - embedded from money/accounting.js at patch time ==
+   Single source of truth is money/accounting.js with its own test suite. Do not
+   edit this copy by hand; re-run patch-handoff.py instead. */
+/* ===========================================================================
+   FireSpark accounting handoff — v0.1, 27 July 2026
+   Turns a FireSpark quote into a file the customer's accounting package can
+   take. Pure string building. NO UI, NO DOM, NO network, NO tax arithmetic.
+
+   FireSpark owns the WORK. Xero and MYOB own the MONEY. Nothing here computes
+   GST — it names a tax CODE and lets the package apply its own rate.
+
+   Three outputs, and each is honest about what it actually is:
+
+     generic  — a plain CSV of the quote lines. Works everywhere, imports
+                nowhere. For a bookkeeper to work from without retyping.
+
+     myobQuote — MYOB AccountRight "Sales - Services" import, Sale Status Q,
+                so it lands as a real QUOTE. AccountRight DESKTOP ONLY: MYOB
+                Business, Essentials and AccountRight-in-the-browser have no
+                sales import at all.
+
+     xeroInvoice — Xero sales invoice CSV. Offered ONLY on an approved quote,
+                because Xero CANNOT IMPORT QUOTES AT ALL — no CSV path exists,
+                the feature request has been open since 2013 and Xero said in
+                March 2025 it is not on the roadmap. An approved quote whose
+                work is done is an invoice, so that is what we hand over.
+
+   Verified 27 Jul 2026 against Xero's own SalesInvoiceTemplate.csv and MYOB's
+   published import-field list. Where the vendors disagree with themselves the
+   conservative choice is taken and the reason is in a comment.
+   =========================================================================== */
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory(require("./money.js"));
+  else root.FSAccounting = factory(root.FSMoney);
+}(typeof self !== "undefined" ? self : this, function (M) {
+  "use strict";
+
+  var TAB = "\t";
+
+  function cell(v) {
+    var t = String(v == null ? "" : v);
+    return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  }
+  /* MYOB lists quotation marks under "Invalid Characters" for imports, so a
+     tab-delimited field is stripped, never quoted. */
+  function tabCell(v) {
+    return String(v == null ? "" : v).replace(/[\t\r\n"]/g, " ").trim();
+  }
+
+  /* Xero reads dates against the ORGANISATION's region and the file declares
+     nothing, so an AU org must be fed dd/mm/yyyy. A file of dates that are all
+     day<=12 imports silently wrong in a US-region org. */
+  function dateAU(iso) {
+    var d = new Date(iso);
+    if (isNaN(d)) return "";
+    var p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return p(d.getUTCDate()) + "/" + p(d.getUTCMonth() + 1) + "/" + d.getUTCFullYear();
+  }
+  function addDays(iso, n) {
+    var d = new Date(iso);
+    if (isNaN(d)) return iso;
+    d.setUTCDate(d.getUTCDate() + (n || 0));
+    return d.toISOString();
+  }
+
+  var DEFAULTS = {
+    xeroAccount: "200",              /* Sales. Must already exist in their chart. */
+    xeroTax: "GST on Income",        /* the tax rate's NAME - the CSV takes the name, not the API code OUTPUT */
+    myobAccount: "4-1000",
+    myobTax: "GST",
+    dueDays: 14
+  };
+  function cfg(opts) {
+    var o = opts || {}, out = {};
+    for (var k in DEFAULTS) {
+      if (!Object.prototype.hasOwnProperty.call(DEFAULTS, k)) continue;
+      out[k] = (o[k] == null || o[k] === "") ? DEFAULTS[k] : o[k];
+    }
+    return out;
+  }
+
+  /* One normalised line shape, so every adapter reads the same thing. */
+  function lines(q) {
+    return (q.lines || []).map(function (l) {
+      var qty = l.qty == null ? 1 : l.qty;
+      var unit = M.isCents(l.unitPriceCents) ? l.unitPriceCents : 0;
+      var desc = l.description || "";
+      if (l.kind === "labour" && l.minutes != null) desc += " (" + l.minutes + " min)";
+      return {
+        description: desc,
+        qty: qty,
+        unitCents: unit,
+        amountCents: M.roundHalfUp(unit * qty),
+        unpriced: (l.kind === "item" && l.priceSource === "none") || (l.kind === "labour" && l.priced === false)
+      };
+    });
+  }
+
+  /* Anything that would make the handed-over file wrong. Reported, never
+     silently worked around. */
+  function checks(q, kind, opts) {
+    var out = [];
+    if (!q.lines || !q.lines.length) out.push("The quote has no lines.");
+    if (lines(q).some(function (l) { return l.unpriced; }))
+      out.push("Some lines have no price. They would go across as $0.00 — price them first.");
+    if (!q.clientName)
+      out.push("The quote has no client name, so the accounting package cannot match a contact.");
+    if (kind === "xeroInvoice") {
+      if (q.status !== "approved")
+        out.push("Xero cannot import quotes at all — only invoices. Hand this over once the customer has approved it.");
+      var c = cfg(opts);
+      if (!c.xeroAccount) out.push("No Xero account code set.");
+    }
+    if (kind === "myobQuote") {
+      var n = String((opts && opts.number) || q.number || "");
+      /* MYOB's product docs allow 13, but its IMPORT field list still says 8
+         and MYOB has not confirmed the parser was updated. Warn, do not trim. */
+      if (n.length > 8) out.push("MYOB's import documentation still limits Invoice No. to 8 characters — \"" + n + "\" is " + n.length + ". It may be rejected.");
+    }
+    return out;
+  }
+
+  /* ------------------------------------------------------------- generic --
+     Not an import format and does not pretend to be. A bookkeeper opens it. */
+  var GENERIC_COLS = ["Quote", "Status", "Date", "Client", "Site", "Where", "Defect",
+                      "Line", "Qty", "Unit price", "Amount"];
+  function generic(q) {
+    var rows = [GENERIC_COLS.map(cell).join(",")];
+    lines(q).forEach(function (l) {
+      rows.push([
+        q.number || "(draft)", q.status || "", String(q.created || "").slice(0, 10),
+        q.clientName || "", q.siteName || "", q.where || "", q.defectDesc || "",
+        l.description, l.qty,
+        l.unpriced ? "" : M.fromCents(l.unitCents),
+        l.unpriced ? "" : M.fromCents(l.amountCents)
+      ].map(cell).join(","));
+    });
+    return "﻿" + rows.join("\r\n") + "\r\n";
+  }
+
+  /* ---------------------------------------------------------------- xero --
+     The 27-column SalesInvoiceTemplate.csv, verbatim. The leading * is part of
+     the header TEXT in Xero's own template and marks a mandatory column.
+     Deliberately absent: Total, TaxAmount, Discount. They are not in the
+     current template and we do not compute tax - Xero applies its own rate
+     from *TaxType at import time. */
+  var XERO_COLS = ["*ContactName", "EmailAddress", "POAddressLine1", "POAddressLine2",
+    "POAddressLine3", "POAddressLine4", "POCity", "PORegion", "POPostalCode", "POCountry",
+    "*InvoiceNumber", "Reference", "*InvoiceDate", "*DueDate", "InventoryItemCode",
+    "*Description", "*Quantity", "*UnitAmount", "Discount", "*AccountCode", "*TaxType",
+    "TrackingName1", "TrackingOption1", "TrackingName2", "TrackingOption2", "Currency",
+    "BrandingTheme"];
+
+  function xeroInvoice(q, opts) {
+    var c = cfg(opts);
+    /* Xero's CSV import REQUIRES *InvoiceNumber and will not generate one -
+       unlike the API, where omitting it lets Xero allocate. So the file must
+       carry a number. It defaults to the quote number and stays editable, and
+       the quote number also goes in Reference so the two are traceable. */
+    var invNo = (opts && opts.number) || q.number || "";
+    var issued = (opts && opts.date) || q.sentAt || q.created;
+    var due = addDays(issued, c.dueDays);
+    var rows = [XERO_COLS.map(cell).join(",")];
+    lines(q).forEach(function (l) {
+      /* Header fields repeat on every row. Xero groups rows into one invoice by
+         *InvoiceNumber and reads the header values from the first row of the
+         group, so they must agree on every row. */
+      rows.push([
+        q.clientName || "", "", "", "", "", "", "", "", "", "",
+        invNo, q.number || "", dateAU(issued), dateAU(due), "",
+        l.description, l.qty, M.fromCents(l.unitCents), "",
+        c.xeroAccount, c.xeroTax,
+        "", "", "", "", "AUD", ""
+      ].map(cell).join(","));
+    });
+    return "﻿" + rows.join("\r\n") + "\r\n";
+  }
+
+  /* ---------------------------------------------------------------- myob --
+     AccountRight "Sales - Services". Services rather than Items because Items
+     requires every *Item Number to already exist in their company file, and we
+     will not force our catalogue onto theirs.
+
+     Three things that make an AccountRight import fail silently and are easy to
+     miss:
+       * the first cell must contain {} or AccountRight assumes a pre-2011 file
+       * the file must be TAB separated and named .txt, not .csv
+       * a blank row must separate transactions
+     Sale Status "Q" is what makes it a QUOTE. Omit it and MYOB creates an
+     INVOICE without complaining. */
+  var MYOB_COLS = ["Co./Last Name", "Invoice No.", "Date", "Description",
+                   "Account No.", "Amount", "Tax Code", "Sale Status", "Journal Memo"];
+
+  function myobQuote(q, opts) {
+    var c = cfg(opts);
+    var invNo = (opts && opts.number) || q.number || "";
+    var issued = (opts && opts.date) || q.sentAt || q.created;
+    var memo = [q.siteName, q.where, q.defectDesc].filter(Boolean).join(" - ");
+    var out = ["{}", MYOB_COLS.map(tabCell).join(TAB)];
+    lines(q).forEach(function (l) {
+      out.push([
+        q.clientName || "", invNo, dateAU(issued), l.description,
+        c.myobAccount,
+        /* MYOB requires tax-EXCLUSIVE figures here, and we send no Tax Amount
+           at all so AccountRight works it out from the Tax Code. */
+        M.fromCents(l.amountCents),
+        c.myobTax, "Q", memo
+      ].map(tabCell).join(TAB));
+    });
+    out.push("");            /* blank row terminates the transaction */
+    return out.join("\r\n") + "\r\n";
+  }
+
+  var ADAPTERS = [
+    { k: "generic", label: "Quote lines (CSV)", ext: "csv", mime: "text/csv",
+      note: "Opens in any spreadsheet. Nothing imports it automatically — it is for a person to work from.",
+      build: generic },
+    { k: "myobQuote", label: "MYOB AccountRight quote", ext: "txt", mime: "text/plain",
+      note: "Imports as a real quote. AccountRight DESKTOP only — MYOB Business, Essentials and the browser version have no sales import.",
+      build: myobQuote },
+    { k: "xeroInvoice", label: "Xero invoice (CSV)", ext: "csv", mime: "text/csv",
+      note: "Xero cannot import quotes at all, only invoices — so this is offered once the customer has approved and the work is billable.",
+      build: xeroInvoice }
+  ];
+  function adapter(k) {
+    for (var i = 0; i < ADAPTERS.length; i++) if (ADAPTERS[i].k === k) return ADAPTERS[i];
+    return null;
+  }
+  function filename(k, q) {
+    var a = adapter(k);
+    if (!a) return "export.txt";
+    return k + "-" + (q.number || "draft") + "." + a.ext;
+  }
+  function build(k, q, opts) {
+    var a = adapter(k);
+    if (!a) throw new Error("no such adapter: " + k);
+    return a.build(q, opts);
+  }
+
+  return {
+    DEFAULTS: DEFAULTS, ADAPTERS: ADAPTERS, adapter: adapter,
+    XERO_COLS: XERO_COLS, MYOB_COLS: MYOB_COLS, GENERIC_COLS: GENERIC_COLS,
+    dateAU: dateAU, addDays: addDays, cfg: cfg, lines: lines,
+    checks: checks, build: build, filename: filename,
+    generic: generic, xeroInvoice: xeroInvoice, myobQuote: myobQuote
+  };
+}));
+
+/* ===== Accounting handoff UI ================================================
+   FireSpark hands the document over. It never sends anything itself, never
+   holds an API key, and never computes a tax rate. */
+
+function fsAcctCfg() {
+  if (!fsRegister) return {};
+  fsRegister.accounting = fsRegister.accounting || {};
+  return fsRegister.accounting;
+}
+
+function fsAcctSetup() {
+  const c = fsAcctCfg(), D = FSAccounting.DEFAULTS;
+  const ask = (label, key, note) => {
+    const v = prompt(label + (note ? "\n\n" + note : ""), c[key] == null ? D[key] : c[key]);
+    if (v === null) return false;
+    c[key] = String(v).trim();
+    return true;
+  };
+  if (!ask("Xero account code for this work", "xeroAccount",
+      "It must already exist in their chart of accounts, or Xero rejects the row. 200 is the usual Sales code.")) return;
+  if (!ask("Xero tax rate NAME", "xeroTax",
+      "Xero's CSV takes the rate's NAME, not the API code — \"GST on Income\", not \"OUTPUT\". Exact match, case sensitive.")) return;
+  if (!ask("MYOB account number", "myobAccount", "Must already exist in their company file.")) return;
+  if (!ask("MYOB tax code", "myobTax", "Usually GST, FRE or N-T.")) return;
+  const d = prompt("Payment terms — days until due", String(c.dueDays == null ? D.dueDays : c.dueDays));
+  if (d !== null) c.dueDays = Math.max(0, parseInt(d, 10) || 0);
+  fsMarkDirty();
+  alert("✓ Saved. These travel with the register, so everyone using it exports the same way.");
+}
+
+function fsAcctExport(q) {
+  const list = FSAccounting.ADAPTERS;
+  const menu = list.map((a, i) => "  " + (i + 1) + ". " + a.label + "\n     " + a.note).join("\n\n");
+  const p = prompt("Hand this quote over to an accounting system:\n\n" + menu +
+    "\n\nFireSpark writes the file. You import it — nothing is sent anywhere.\n\nType a number:");
+  if (p === null) return;
+  const a = list[parseInt(p, 10) - 1];
+  if (!a) { alert("No option with that number."); return; }
+
+  const opts = Object.assign({}, fsAcctCfg());
+  /* Xero's importer needs a number and will not make one up. Default to the
+     quote number, let it be changed, and keep the quote number in Reference. */
+  if (a.k !== "generic") {
+    const n = prompt((a.k === "xeroInvoice"
+        ? "Invoice number for Xero.\n\nXero's CSV import will not generate one, so the file has to carry it. Your quote number goes in the Reference field either way."
+        : "Quote number for MYOB.") + "\n\nChange it to match your own sequence if you need to.",
+      q.number || "");
+    if (n === null) return;
+    opts.number = String(n).trim();
+    if (!opts.number) { alert("A number is required for this format."); return; }
+  }
+
+  const problems = FSAccounting.checks(q, a.k, opts);
+  if (problems.length) {
+    const fatal = a.k === "xeroInvoice" && q.status !== "approved";
+    if (fatal) { alert("Cannot export yet:\n\n• " + problems.join("\n• ")); return; }
+    if (!confirm("Worth checking first:\n\n• " + problems.join("\n• ") + "\n\nExport anyway?")) return;
+  }
+  /* Xero matches a contact by EXACT name and quietly creates a new one when it
+     does not match - which duplicates a client list rather than erroring. */
+  if (a.k === "xeroInvoice") {
+    if (!confirm('Xero matches the customer by exact name.\n\nThis file says: "' + (q.clientName || "") +
+      '"\n\nIf that is not character-for-character what Xero already has, Xero will quietly create a SECOND contact rather than warn you.\n\nCarry on?')) return;
+  }
+
+  const text = FSAccounting.build(a.k, q, opts);
+  deliverFile(new Blob([text], { type: a.mime }), FSAccounting.filename(a.k, q), a.mime);
+
+  if (a.k === "myobQuote") {
+    alert("✓ Saved as a .txt — that is deliberate, AccountRight rejects .csv.\n\n" +
+      "Import it in AccountRight DESKTOP: File → Import/Export Assistant → Import → Sales → Service.\n\n" +
+      "MYOB Business, Essentials and AccountRight in the browser cannot import sales at all.");
+  } else if (a.k === "xeroInvoice") {
+    alert("✓ Saved.\n\nIn Xero: Business → Invoices → Import. Xero applies its own GST from the tax rate — FireSpark sends the code, never a rate.\n\nIt lands as a DRAFT invoice for you to check before approving.");
+  }
+}
+/* ===== end accounting handoff UI ============================================ */
+
+
 /* ===== Pricebook =============================================================
    Reece's design, 27 Jul 2026. The catalogue ships with the ITEMS and none of
    the PRICES: there is no Australian task-price database to license, and each
@@ -8924,7 +9251,8 @@ function fsQuoteListRender() {
   let html = '<div style="margin-bottom:12px"><a id="fsQlBack" class="fsCrumb">&#8592; Portfolio dashboard</a></div>';
   html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">' +
     '<h2 style="font-size:20px;flex:1;min-width:150px">&#128195; Quotes</h2>' +
-    '<button class="fsbtn" id="fsQlSeq">&#128290; Numbering</button></div>';
+    '<button class="fsbtn" id="fsQlSeq">&#128290; Numbering</button>' +
+    '<button class="fsbtn" id="fsQlAcct">&#127974; Accounting setup</button></div>';
   html += '<div class="fscard" style="padding:4px 14px">';
   if (!qs.length) html += '<div style="color:var(--fs-faint);font-size:13.5px;padding:14px 0">No quotes yet. Start one from a defect on the Defect pipeline.</div>';
   qs.forEach((q, i) => {
@@ -8940,6 +9268,7 @@ function fsQuoteListRender() {
   html += '</div>';
   wrap.innerHTML = html;
   document.getElementById("fsQlBack").onclick = () => { fsDashMode = "sites"; fsDashRender(); };
+  document.getElementById("fsQlAcct").onclick = fsAcctSetup;
   document.getElementById("fsQlSeq").onclick = () => {
     const r = fsRegister;
     const cur = Number.isInteger(r.quoteSeq) ? r.quoteSeq : 1000;
@@ -9034,7 +9363,13 @@ function fsQuoteRender() {
             '<button class="fsbtn" id="fsQDecline">Declined</button>';
   }
   html += '<button class="fsbtn" id="fsQPdf">&#128196; PDF</button>' +
+          '<button class="fsbtn" id="fsQAcct">&#127974; Send to accounting</button>' +
           '<button class="fsbtn" id="fsQDel2" style="color:#c62828">Delete quote</button></div>';
+  html += '<div style="margin-top:8px;font-size:11.5px;color:var(--fs-faint)">' +
+    (q.status === "approved"
+      ? 'Approved — you can hand this to Xero as an invoice, or to MYOB AccountRight as a quote.'
+      : 'Xero cannot import quotes at all, only invoices, so its export appears once this is approved. MYOB AccountRight can take it as a quote now.') +
+    '</div>';
   wrap.innerHTML = html;
 
   document.getElementById("fsQBack").onclick = () => {
@@ -9101,6 +9436,7 @@ function fsQuoteRender() {
   const dec = document.getElementById("fsQDecline");
   if (dec) dec.onclick = () => { fsQuoteSetStatus(q, "declined"); fsMarkDirty(); fsQuoteRender(); };
   document.getElementById("fsQPdf").onclick = () => fsQuotePdf(q);
+  document.getElementById("fsQAcct").onclick = () => fsAcctExport(q);
   document.getElementById("fsQDel2").onclick = () => {
     if (!confirm("Delete this quote?\n\nThe defect goes back to not quoted. The defect itself is not touched.")) return;
     const d = fsQuoteDefect(q);
