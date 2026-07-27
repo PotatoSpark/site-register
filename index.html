@@ -171,7 +171,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.22 (fs 1.20)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.23 (fs 1.21)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -7359,6 +7359,845 @@ document.getElementById("fsDashBtn").onclick = async () => {
   fsShow("fsDashView");
 };
 
+/* ===== Money core - embedded from money/money.js at patch time =============
+   Single source of truth is money/money.js with its own test suite. Do not
+   edit this copy by hand; re-run patch-pricebook.py instead. */
+/* ===========================================================================
+   FireSpark money core — v0.1, 26 July 2026
+   Pure arithmetic and resolution. NO UI, NO DOM, NO app state, NO network.
+   Everything here is deterministic and testable without a browser.
+
+   The eight rules from MONEY-DESIGN.md live here and nowhere else:
+     1. Money is INTEGER CENTS. Never a float, never a string, never dollars.
+     2. Tax is a CODE, never a rate. The number 0.10 appears nowhere.
+     3. lineAmountsInclusive is explicit per document. Never inferred.
+     4. Round at the LINE, half-up, to the cent. Totals sum already-rounded lines.
+     5. Idempotency keys are stable local ids + a payload hash.
+     6. External ids are per package, per record.
+     7. (preview-before-push — UI layer)
+     8. (offline-first — app layer)
+
+   Nothing in this file knows what Xero or MYOB are.
+   =========================================================================== */
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory();
+  else root.FSMoney = factory();
+}(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
+
+  /* ---------------------------------------------------------------- money --
+     RULE 1. Everything is an integer number of cents. These helpers are the
+     ONLY place arithmetic happens, so there is one place to be wrong. */
+
+  function isCents(v) { return typeof v === "number" && Number.isInteger(v); }
+
+  function assertCents(v, what) {
+    if (!isCents(v)) throw new TypeError((what || "value") + " must be integer cents, got " + JSON.stringify(v));
+    return v;
+  }
+
+  /* RULE 4. Half-up, and half-up AWAY FROM ZERO so a credit rounds the mirror
+     image of the charge it reverses. Math.round(-0.5) is 0 in JS, which would
+     quietly break that symmetry. */
+  function roundHalfUp(n) {
+    if (!isFinite(n)) throw new TypeError("cannot round " + n);
+    return n < 0 ? -Math.round(-n) : Math.round(n);
+  }
+
+  /* Money from a human-typed string or number of DOLLARS. The only doorway
+     between the outside world and cents — import/UI must come through here. */
+  function toCents(dollars) {
+    if (typeof dollars === "number") {
+      if (!isFinite(dollars)) throw new TypeError("not a number: " + dollars);
+      return roundHalfUp(dollars * 100);
+    }
+    var s = String(dollars == null ? "" : dollars).trim();
+    if (!s) return 0;
+    s = s.replace(/[$\s,]/g, "");
+    var neg = /^\(.*\)$/.test(s);          /* (12.34) accounting negative */
+    if (neg) s = s.slice(1, -1);
+    if (!/^-?\d*(\.\d*)?$/.test(s)) throw new TypeError("not a money value: " + dollars);
+    var n = parseFloat(s);
+    if (!isFinite(n)) n = 0;
+    return roundHalfUp(n * 100) * (neg ? -1 : 1);
+  }
+
+  function fromCents(c) {
+    assertCents(c, "cents");
+    var neg = c < 0, a = Math.abs(c);
+    return (neg ? "-" : "") + Math.floor(a / 100) + "." + String(a % 100).padStart(2, "0");
+  }
+
+  function fmt(c, cur) {
+    return (cur || "$") + fromCents(c);
+  }
+
+  /* ------------------------------------------------------------------ tax --
+     RULE 2. A tax code is an OPAQUE STRING. This module never knows what rate
+     a code represents — that is the accounting package's job. The only thing
+     it does is carry the code around and refuse to invent one.
+
+     A "taxTable" is supplied by the ADAPTER at push time, never stored here,
+     and is used only for on-screen estimates. It maps code -> basis points
+     (1000 = 10%) so even the estimate never stores a float. */
+
+  var TAX_UNSET = "";
+
+  function taxRateBp(code, taxTable) {
+    if (!taxTable || !Object.prototype.hasOwnProperty.call(taxTable, code)) return null;
+    var bp = taxTable[code];
+    if (!Number.isInteger(bp)) throw new TypeError("tax table entries must be integer basis points: " + code);
+    return bp;
+  }
+
+  /* ----------------------------------------------------------------- line --
+     RULE 3 + RULE 4. A line is priced exclusive-of-tax internally, ALWAYS.
+     If the document is inclusive, the entered unit price already contains tax
+     and we back it out — but only when we know the rate. If we don't know the
+     rate we keep the entered figure and report tax as unknown rather than
+     guessing, because a guessed tax figure is worse than a missing one. */
+
+  function lineNet(line) {
+    assertCents(line.unitPriceCents, "unitPriceCents");
+    var qty = line.qty == null ? 1 : line.qty;
+    if (typeof qty !== "number" || !isFinite(qty)) throw new TypeError("qty must be a finite number");
+    var disc = line.discountPct == null ? 0 : line.discountPct;
+    if (typeof disc !== "number" || !isFinite(disc) || disc < 0 || disc > 100) {
+      throw new RangeError("discountPct must be 0..100");
+    }
+    /* Round ONCE, at the line, after qty and discount. */
+    return roundHalfUp(line.unitPriceCents * qty * (1 - disc / 100));
+  }
+
+  /* Split a gross (tax-inclusive) amount into net + tax at a basis-point rate. */
+  function splitInclusive(grossCents, bp) {
+    assertCents(grossCents, "grossCents");
+    var net = roundHalfUp(grossCents * 10000 / (10000 + bp));
+    return { net: net, tax: grossCents - net };
+  }
+
+  function taxOnNet(netCents, bp) {
+    assertCents(netCents, "netCents");
+    return roundHalfUp(netCents * bp / 10000);
+  }
+
+  /* Compute one line. Returns cents plus an explicit taxKnown flag. */
+  function computeLine(line, doc, taxTable) {
+    var inclusive = !!(doc && doc.lineAmountsInclusive);
+    var code = line.taxCode == null ? TAX_UNSET : line.taxCode;
+    var bp = taxRateBp(code, taxTable);
+    var raw = lineNet(line);
+
+    if (bp == null) {
+      /* Rate unknown. Carry the figure, admit the tax is unknown. */
+      return {
+        id: line.id, taxCode: code, taxKnown: false,
+        netCents: inclusive ? 0 : raw,
+        taxCents: 0,
+        grossCents: inclusive ? raw : raw,
+        enteredCents: raw,
+        inclusive: inclusive
+      };
+    }
+    if (inclusive) {
+      var s = splitInclusive(raw, bp);
+      return { id: line.id, taxCode: code, taxKnown: true, netCents: s.net, taxCents: s.tax,
+               grossCents: raw, enteredCents: raw, inclusive: true };
+    }
+    var tax = taxOnNet(raw, bp);
+    return { id: line.id, taxCode: code, taxKnown: true, netCents: raw, taxCents: tax,
+             grossCents: raw + tax, enteredCents: raw, inclusive: false };
+  }
+
+  /* ------------------------------------------------------------- document --
+     RULE 4. Totals are the SUM OF ALREADY-ROUNDED LINES. Never recompute from
+     an unrounded base — that is how a document total disagrees with the sum of
+     its own visible lines, which is the bug users actually report.
+
+     Tax is subtotalled PER CODE, because that is how every accounting package
+     wants it and how a compliant tax invoice must present it. */
+
+  function computeDoc(doc, taxTable) {
+    var lines = (doc && doc.lines) || [];
+    var out = [], sub = 0, tax = 0, gross = 0, byCode = {}, anyUnknown = false;
+
+    for (var i = 0; i < lines.length; i++) {
+      var c = computeLine(lines[i], doc, taxTable);
+      out.push(c);
+      if (!c.taxKnown) anyUnknown = true;
+      sub += c.netCents;
+      tax += c.taxCents;
+      gross += c.grossCents;
+      var k = c.taxCode || TAX_UNSET;
+      if (!byCode[k]) byCode[k] = { netCents: 0, taxCents: 0, known: c.taxKnown };
+      byCode[k].netCents += c.netCents;
+      byCode[k].taxCents += c.taxCents;
+      if (!c.taxKnown) byCode[k].known = false;
+    }
+    return {
+      lines: out,
+      subtotalCents: sub,
+      taxCents: tax,
+      totalCents: gross,
+      taxByCode: byCode,
+      taxKnown: !anyUnknown,
+      lineAmountsInclusive: !!(doc && doc.lineAmountsInclusive),
+      currency: (doc && doc.currency) || "AUD"
+    };
+  }
+
+  /* ------------------------------------------------------------ pricebook --
+     Resolution order, in ONE place so it can never drift:
+        client override  ->  pricebook item  ->  manual line
+     A manual line is always allowed. Refusing one makes the tool unusable. */
+
+  function resolvePrice(itemId, clientId, book) {
+    if (!book) return null;
+    var over = (book.clientPricing || []).filter(function (p) {
+      return p.clientId === clientId && p.itemId === itemId;
+    })[0];
+    if (over && isCents(over.unitPriceCents)) {
+      return { unitPriceCents: over.unitPriceCents, source: "client", note: over.note || "" };
+    }
+    var item = (book.items || []).filter(function (x) { return x.id === itemId; })[0];
+    if (item && isCents(item.unitPriceCents)) {
+      return { unitPriceCents: item.unitPriceCents, source: "item", note: "" };
+    }
+    return null;
+  }
+
+  function findItem(itemId, book) {
+    return ((book && book.items) || []).filter(function (x) { return x.id === itemId; })[0] || null;
+  }
+
+  /* Markup tiers (Fergus's idea): one price list, different margin profiles by
+     client or job type, so commercial / domestic / warranty need no second
+     catalogue. Applied ONLY when there is no explicit client override. */
+  function applyTier(cents, tierPct) {
+    assertCents(cents, "cents");
+    if (tierPct == null) return cents;
+    if (typeof tierPct !== "number" || !isFinite(tierPct)) throw new TypeError("tierPct must be a number");
+    return roundHalfUp(cents * (1 + tierPct / 100));
+  }
+
+  /* ------------------------------------------------------------ assembly --
+     The Tradify Kit, done properly: ONE client-facing line, exploded into its
+     components downstream. Usable on every document type, not quotes only. */
+
+  function assemblyCost(asm, clientId, book) {
+    var comps = (asm.components || []), total = 0, missing = [];
+    var lines = comps.map(function (c) {
+      var r = resolvePrice(c.itemId, clientId, book);
+      if (!r) { missing.push(c.itemId); return { itemId: c.itemId, qty: c.qty, unitPriceCents: 0, lineCents: 0, missing: true }; }
+      var lc = roundHalfUp(r.unitPriceCents * (c.qty == null ? 1 : c.qty));
+      total += lc;
+      return { itemId: c.itemId, qty: c.qty, unitPriceCents: r.unitPriceCents, lineCents: lc, source: r.source };
+    });
+    return { components: lines, rolledUpCents: total, missing: missing };
+  }
+
+  function assemblyPrice(asm, clientId, book) {
+    var roll = assemblyCost(asm, clientId, book);
+    var price;
+    if (asm.priceMode === "fixed") {
+      if (!isCents(asm.fixedPriceCents)) throw new TypeError("a fixed-price assembly needs fixedPriceCents");
+      price = asm.fixedPriceCents;
+    } else {
+      price = roll.rolledUpCents;
+    }
+    return {
+      unitPriceCents: price,
+      priceMode: asm.priceMode === "fixed" ? "fixed" : "sum",
+      rolledUpCents: roll.rolledUpCents,
+      marginCents: price - roll.rolledUpCents,     /* fixed mode only: what you're holding */
+      components: roll.components,
+      missing: roll.missing
+    };
+  }
+
+  /* Build a document LINE from an assembly. The client sees one line; the
+     components ride along hidden for the job sheet, PO and costing view. */
+  function lineFromAssembly(asm, clientId, book, qty) {
+    var p = assemblyPrice(asm, clientId, book);
+    return {
+      assemblyId: asm.id,
+      code: asm.code || "",
+      description: asm.description || asm.name || "",
+      qty: qty == null ? 1 : qty,
+      unitPriceCents: p.unitPriceCents,          /* COPIED at add-time, rule: never reference */
+      taxCode: asm.taxCode == null ? TAX_UNSET : asm.taxCode,
+      accountCode: asm.accountCode || "",
+      components: p.components,
+      _missing: p.missing
+    };
+  }
+
+  function lineFromItem(itemId, clientId, book, qty) {
+    var item = findItem(itemId, book);
+    if (!item) return null;
+    var r = resolvePrice(itemId, clientId, book);
+    return {
+      itemId: itemId,
+      code: item.code || "",
+      description: item.description || item.name || "",
+      qty: qty == null ? 1 : qty,
+      unitPriceCents: r ? r.unitPriceCents : 0,
+      priceSource: r ? r.source : "none",
+      taxCode: item.taxCode == null ? TAX_UNSET : item.taxCode,
+      accountCode: item.accountCode || ""
+    };
+  }
+
+  /* ----------------------------------------------------------- suggestion --
+     Uptick's idea, deterministic: a defect type carries a shortlist that floats
+     to the top of the picker. Full catalogue search still sits underneath.
+     NOTE: returns ids and names only. Callers on the FIELD side must not
+     resolve prices — see MONEY-DESIGN §3.9. */
+
+  function suggestFor(defectType, book) {
+    var out = [], seen = {};
+    function push(kind, o) {
+      if (!o || seen[kind + o.id]) return;
+      seen[kind + o.id] = 1;
+      out.push({ kind: kind, id: o.id, code: o.code || "", name: o.name || "" });
+    }
+    ((book && book.assemblies) || []).forEach(function (a) {
+      if ((a.defectTypes || []).indexOf(defectType) >= 0) push("assembly", a);
+    });
+    ((book && book.items) || []).forEach(function (i) {
+      if ((i.defectTypes || []).indexOf(defectType) >= 0) push("item", i);
+    });
+    return out;
+  }
+
+  /* --------------------------------------------------------- idempotency --
+     RULE 5. A stable hash of exactly what was sent. Same payload -> same hash
+     -> no-op. Different -> update. FNV-1a: tiny, dependency-free, and this is
+     a change-detector not a security primitive. Key order is normalised so a
+     re-serialised identical document does not look changed. */
+
+  function stableStringify(v) {
+    if (v === null || typeof v !== "object") return JSON.stringify(v);
+    if (Array.isArray(v)) return "[" + v.map(stableStringify).join(",") + "]";
+    var keys = Object.keys(v).sort();
+    return "{" + keys.map(function (k) {
+      return JSON.stringify(k) + ":" + stableStringify(v[k]);
+    }).join(",") + "}";
+  }
+
+  function payloadHash(obj) {
+    var s = stableStringify(obj), h = 0x811c9dc5;
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+    }
+    return ("0000000" + h.toString(16)).slice(-8);
+  }
+
+  /* --------------------------------------------------------------- audit --
+     A cheap guard the app can assert in tests and in dev: walk any object and
+     complain about anything that looks like money but isn't integer cents. */
+
+  var MONEY_WORDS = { price: 1, amount: 1, total: 1, subtotal: 1, cost: 1, fee: 1,
+                      charge: 1, rate: 1, margin: 1, discount: 0 /* a % is legitimately fractional */ };
+
+  /* Split camelCase / snake_case / kebab into lowercase words, so unitPriceCents,
+     total_amount and line-cost are all seen. A plain substring test misses
+     camelCase entirely, which is exactly how a float sneaks through. */
+  function keyWords(k) {
+    return String(k)
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .replace(/[_\-]+/g, " ")
+      .toLowerCase().split(/\s+/).filter(Boolean);
+  }
+
+  function looksLikeMoneyKey(k) {
+    var w = keyWords(k);
+    for (var i = 0; i < w.length; i++) if (MONEY_WORDS[w[i]] === 1) return true;
+    return false;
+  }
+
+  function auditCents(obj, path, problems, seen) {
+    path = path || "$"; problems = problems || []; seen = seen || new Set();
+    if (obj === null || typeof obj !== "object") return problems;
+    if (seen.has(obj)) return problems;          /* cycles must not hang the guard */
+    seen.add(obj);
+    Object.keys(obj).forEach(function (k) {
+      var v = obj[k], p = path + "." + k;
+      if (/cents$/i.test(k)) {
+        /* null/undefined is a LEGITIMATE value: "not priced yet". Blank prices are
+           the designed starting state (Reece, 27 Jul 2026) - the catalogue ships
+           with the items and each trade fills in its own numbers. What this guard
+           exists to catch is a FLOAT, and null is not a float. */
+        if (v != null && !isCents(v)) problems.push({ path: p, value: v, why: "not integer cents" });
+      } else if (looksLikeMoneyKey(k) && typeof v === "number" && !Number.isInteger(v)) {
+        problems.push({ path: p, value: v, why: "float money outside the cents convention" });
+      }
+      if (v && typeof v === "object") auditCents(v, p, problems, seen);
+    });
+    return problems;
+  }
+
+  /* ------------------------------------------------------------- labour --
+     Reece's rule, 27 Jul 2026: labour is SUGGESTED, never autofilled. The same
+     detector is half an hour off a step ladder and most of a morning if it needs
+     a permit, a harness and an EWP to reach. So every number this section
+     produces is marked suggested:true and the UI must make a human confirm it.
+
+     Access difficulty is a property of the PLACE, not the fault - that detector
+     above the stairwell is awkward every single time - so it is read off the
+     equipment/location record, not chosen per defect.
+
+     THE MULTIPLIERS BELOW ARE STARTING POINTS, NOT FACTS. They are editable per
+     profile precisely because nobody has measured them. Do not present them as
+     researched values. */
+
+  var ACCESS_LEVELS = [
+    { k: "normal",   label: "Normal access",          pct: 100 },
+    { k: "ladder",   label: "Ladder / step platform",  pct: 125 },
+    { k: "heights",  label: "Working at heights",      pct: 175 },
+    { k: "ewp",      label: "EWP required",            pct: 250 },
+    { k: "confined", label: "Confined space permit",   pct: 300 }
+  ];
+
+  function accessLevel(k, book) {
+    var custom = (book && book.accessLevels) || null;
+    var list = (custom && custom.length) ? custom : ACCESS_LEVELS;
+    for (var i = 0; i < list.length; i++) if (list[i].k === (k || "normal")) return list[i];
+    return list[0];
+  }
+
+  /* Suggested minutes for a task at a place. Returns the basis as well as the
+     number so the UI can SHOW ITS WORKING - "30 min x EWP 250%" - rather than
+     presenting a figure from nowhere. */
+  function suggestMinutes(task, accessKey, book) {
+    if (!task || task.baseMinutes == null) return null;
+    var base = task.baseMinutes;
+    if (typeof base !== "number" || !isFinite(base) || base < 0) return null;
+    var lvl = accessLevel(accessKey, book);
+    return {
+      minutes: roundHalfUp(base * lvl.pct / 100),
+      baseMinutes: base,
+      access: lvl.k,
+      accessLabel: lvl.label,
+      accessPct: lvl.pct,
+      suggested: true            /* NEVER let a caller drop this flag */
+    };
+  }
+
+  /* A labour line. rateCents may be null - an unpriced rate is the normal
+     starting state, same as an unpriced item. */
+  function labourRate(rateId, book) {
+    return ((book && book.labourRates) || []).filter(function (r) { return r.id === rateId; })[0] || null;
+  }
+
+  function labourLine(task, accessKey, rateId, book) {
+    var s = suggestMinutes(task, accessKey, book);
+    var rate = labourRate(rateId, book);
+    var priced = !!(rate && isCents(rate.rateCents));
+    var hours = s ? s.minutes / 60 : 0;
+    return {
+      kind: "labour",
+      description: (task && (task.labourDescription || task.name)) || "Labour",
+      minutes: s ? s.minutes : null,
+      suggestedMinutes: s ? s.minutes : null,
+      suggested: true,             /* must be confirmed by a human before it counts */
+      confirmed: false,
+      basis: s,
+      rateId: rateId || "",
+      rateCents: priced ? rate.rateCents : null,
+      qty: hours,
+      unitPriceCents: priced ? rate.rateCents : 0,
+      priced: priced,
+      taxCode: (rate && rate.taxCode) || TAX_UNSET
+    };
+  }
+
+  /* Confirming is an explicit act. It is the ONLY way suggested becomes false,
+     and it records what the human actually chose against what was proposed. */
+  function confirmLabour(line, minutes) {
+    var m = minutes == null ? line.suggestedMinutes : minutes;
+    if (m != null && (typeof m !== "number" || !isFinite(m) || m < 0)) {
+      throw new RangeError("minutes must be a non-negative number");
+    }
+    line.minutes = m;
+    line.qty = m == null ? 0 : m / 60;
+    line.suggested = false;
+    line.confirmed = true;
+    line.adjusted = (m != null && line.suggestedMinutes != null && m !== line.suggestedMinutes);
+    return line;
+  }
+
+  /* ---------------------------------------------------------------- stats --
+     Blank prices are the DESIGNED starting state (Reece, 27 Jul): ship the item
+     list, let each trade fill in its own numbers once. So the app needs to say
+     honestly how much is still blank rather than pretend the book is ready. */
+
+  function bookStats(book) {
+    var items = (book && book.items) || [];
+    var rates = (book && book.labourRates) || [];
+    var tasks = (book && book.tasks) || [];
+    var priced = items.filter(function (i) { return isCents(i.unitPriceCents); }).length;
+    var ratesPriced = rates.filter(function (r) { return isCents(r.rateCents); }).length;
+    return {
+      items: items.length,
+      itemsPriced: priced,
+      itemsBlank: items.length - priced,
+      rates: rates.length,
+      ratesPriced: ratesPriced,
+      ratesBlank: rates.length - ratesPriced,
+      tasks: tasks.length,
+      ready: items.length > 0 && priced === items.length && rates.length > 0 && ratesPriced === rates.length
+    };
+  }
+
+  /* ------------------------------------------------------------------ csv --
+     Import/export so nobody types a hundred rows by hand. A BLANK price cell is
+     meaningful and must survive the round trip as null - it means "not priced
+     yet", which is different from zero. Parsing is RFC4180-ish: quoted fields,
+     doubled quotes, embedded commas and newlines. */
+
+  function csvCell(v) {
+    var t = String(v == null ? "" : v);
+    return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  }
+
+  function parseCsv(text) {
+    var s = String(text == null ? "" : text);
+    if (s.charCodeAt(0) === 0xFEFF) s = s.slice(1);        /* strip Excel's BOM */
+    var rows = [], row = [], cur = "", q = false, i = 0;
+    while (i < s.length) {
+      var ch = s[i];
+      if (q) {
+        if (ch === '"') {
+          if (s[i + 1] === '"') { cur += '"'; i += 2; continue; }
+          q = false; i++; continue;
+        }
+        cur += ch; i++; continue;
+      }
+      if (ch === '"') { q = true; i++; continue; }
+      if (ch === ",") { row.push(cur); cur = ""; i++; continue; }
+      if (ch === "\r") { i++; continue; }
+      if (ch === "\n") { row.push(cur); rows.push(row); row = []; cur = ""; i++; continue; }
+      cur += ch; i++;
+    }
+    if (cur !== "" || row.length) { row.push(cur); rows.push(row); }
+    return rows.filter(function (r) { return r.length && r.join("").trim() !== ""; });
+  }
+
+  var ITEM_COLS = ["Code", "Name", "Category", "Unit", "Cost", "Price", "Tax code"];
+
+  function itemsToCsv(items) {
+    var lines = [ITEM_COLS.map(csvCell).join(",")];
+    (items || []).forEach(function (it) {
+      lines.push([
+        it.code || "", it.name || "", it.category || "", it.unit || "ea",
+        isCents(it.costCents) ? fromCents(it.costCents) : "",       /* blank stays blank */
+        isCents(it.unitPriceCents) ? fromCents(it.unitPriceCents) : "",
+        it.taxCode || ""
+      ].map(csvCell).join(","));
+    });
+    return "﻿" + lines.join("\r\n") + "\r\n";
+  }
+
+  /* Returns {items, errors} - never throws on one bad row, because a 200-row
+     import that dies on row 3 and tells you nothing else is useless. */
+  function itemsFromCsv(text) {
+    var rows = parseCsv(text), errors = [], items = [];
+    if (!rows.length) return { items: items, errors: ["The file is empty."] };
+    var head = rows[0].map(function (h) { return String(h).trim().toLowerCase(); });
+    var idx = function (names) {
+      for (var n = 0; n < names.length; n++) {
+        var i = head.indexOf(names[n]);
+        if (i >= 0) return i;
+      }
+      return -1;
+    };
+    var cName = idx(["name", "description", "item"]);
+    if (cName < 0) return { items: items, errors: ["No 'Name' column found. Expected columns: " + ITEM_COLS.join(", ")] };
+    var cCode = idx(["code", "sku", "part no", "part number"]);
+    var cCat = idx(["category", "group", "type"]);
+    var cUnit = idx(["unit", "uom"]);
+    var cCost = idx(["cost", "cost price", "buy"]);
+    var cPrice = idx(["price", "sell", "sell price", "unit price", "charge"]);
+    var cTax = idx(["tax code", "taxcode", "tax"]);
+    var money = function (raw, rowNo, what) {
+      var t = String(raw == null ? "" : raw).trim();
+      if (!t) return null;                       /* blank is legitimate, not an error */
+      try { return toCents(t); }
+      catch (e) { errors.push("Row " + rowNo + ": " + what + " " + JSON.stringify(t) + " is not a money value - left blank."); return null; }
+    };
+    for (var r = 1; r < rows.length; r++) {
+      var row = rows[r];
+      var name = String(row[cName] == null ? "" : row[cName]).trim();
+      if (!name) { errors.push("Row " + (r + 1) + ": no name - skipped."); continue; }
+      items.push({
+        id: "", code: cCode < 0 ? "" : String(row[cCode] || "").trim(),
+        name: name,
+        category: cCat < 0 ? "" : String(row[cCat] || "").trim(),
+        unit: cUnit < 0 ? "ea" : (String(row[cUnit] || "").trim() || "ea"),
+        costCents: cCost < 0 ? null : money(row[cCost], r + 1, "cost"),
+        unitPriceCents: cPrice < 0 ? null : money(row[cPrice], r + 1, "price"),
+        taxCode: cTax < 0 ? "" : String(row[cTax] || "").trim()
+      });
+    }
+    return { items: items, errors: errors };
+  }
+
+  return {
+    /* money */
+    isCents: isCents, assertCents: assertCents, roundHalfUp: roundHalfUp,
+    toCents: toCents, fromCents: fromCents, fmt: fmt,
+    /* tax */
+    TAX_UNSET: TAX_UNSET, taxRateBp: taxRateBp, splitInclusive: splitInclusive, taxOnNet: taxOnNet,
+    /* compute */
+    lineNet: lineNet, computeLine: computeLine, computeDoc: computeDoc,
+    /* pricebook */
+    resolvePrice: resolvePrice, findItem: findItem, applyTier: applyTier,
+    /* assemblies */
+    assemblyCost: assemblyCost, assemblyPrice: assemblyPrice,
+    lineFromAssembly: lineFromAssembly, lineFromItem: lineFromItem,
+    /* suggestion */
+    suggestFor: suggestFor,
+    /* labour - suggested, never autofilled */
+    ACCESS_LEVELS: ACCESS_LEVELS, accessLevel: accessLevel, suggestMinutes: suggestMinutes,
+    labourRate: labourRate, labourLine: labourLine, confirmLabour: confirmLabour,
+    /* pricebook readiness + csv */
+    bookStats: bookStats, ITEM_COLS: ITEM_COLS,
+    parseCsv: parseCsv, itemsToCsv: itemsToCsv, itemsFromCsv: itemsFromCsv,
+    /* idempotency + audit */
+    stableStringify: stableStringify, payloadHash: payloadHash, auditCents: auditCents
+  };
+}));
+
+
+/* ===== Pricebook =============================================================
+   Reece's design, 27 Jul 2026. The catalogue ships with the ITEMS and none of
+   the PRICES: there is no Australian task-price database to license, and each
+   trade knows its own numbers. They fill them in once, the values persist, and
+   they update them when supplier prices move.
+
+   Labour is SUGGESTED, never autofilled. The same detector is half an hour off
+   a step ladder and most of a morning if it needs a permit and an EWP - so the
+   number shows in grey and a human confirms it. Access difficulty is read off
+   the PLACE, because that detector above the stairwell is awkward every time.
+
+   All arithmetic lives in FSMoney (money/money.js, embedded above). Nothing
+   here does maths on money. */
+
+let fsBookTab = "items";
+let fsBookEdit = null;          /* id of the row being edited */
+
+function fsBook() {
+  if (!fsRegister) return null;
+  if (!fsRegister.pricebook) {
+    fsRegister.pricebook = { items: [], labourRates: [], tasks: [], clientPricing: [], accessLevels: null };
+  }
+  const b = fsRegister.pricebook;
+  b.items = b.items || []; b.labourRates = b.labourRates || [];
+  b.tasks = b.tasks || []; b.clientPricing = b.clientPricing || [];
+  return b;
+}
+function fsBookId(p) { return p + Date.now().toString(36) + Math.random().toString(16).slice(2, 6); }
+
+/* Access resolves most-specific-first: the tagged device, then the building,
+   then the site, then normal. Set it once where it is true. */
+function fsAccessOf(node) { return (node && node.accessDefault) || ""; }
+function fsAccessResolve(site, parent, item) {
+  return fsAccessOf(item) || fsAccessOf(site) || fsAccessOf(parent) || "normal";
+}
+function fsAccessList() {
+  const b = fsRegister && fsRegister.pricebook;
+  const custom = b && b.accessLevels;
+  return (custom && custom.length) ? custom : FSMoney.ACCESS_LEVELS;
+}
+function fsAccessSelect(id, val, extra) {
+  return '<select id="' + id + '" ' + (extra || '') + ' style="background:#1a1d21;border:1px solid var(--fs-border);border-radius:6px;color:#e8e8e8;padding:5px 7px;font-size:12.5px">' +
+    fsAccessList().map(l => '<option value="' + fsEsc(l.k) + '"' + (l.k === (val || "normal") ? ' selected' : '') + '>' + fsEsc(l.label) + '</option>').join('') +
+    '</select>';
+}
+
+/* A money cell that can legitimately be EMPTY. Blank means "not priced yet",
+   which is different from zero and must never render as $0.00. */
+function fsMoneyIn(cls, id, cents) {
+  return '<input type="text" class="' + cls + '" data-id="' + fsEsc(id) + '" value="' +
+    (FSMoney.isCents(cents) ? fsEsc(FSMoney.fromCents(cents)) : '') +
+    '" placeholder="—" inputmode="decimal" style="width:76px;text-align:right;background:#1a1d21;border:1px solid var(--fs-border);border-radius:6px;color:#e8e8e8;padding:5px 6px;font-size:12.5px">';
+}
+/* Read a money input back. Empty stays null - it is a real value here. */
+function fsMoneyOut(el) {
+  const t = String(el.value == null ? "" : el.value).trim();
+  if (!t) return null;
+  try { return FSMoney.toCents(t); } catch (e) { return null; }
+}
+
+function fsBookRender() {
+  const wrap = document.getElementById("fsDashView");
+  const b = fsBook();
+  const st = FSMoney.bookStats(b);
+  let html = '<div style="margin-bottom:12px"><a id="fsBookBack" class="fsCrumb">&#8592; Portfolio dashboard</a></div>';
+  html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">' +
+    '<h2 style="font-size:20px;flex:1;min-width:150px">&#128176; Pricebook</h2>' +
+    '<button class="fsbtn" id="fsBookCsvOut">&#128202; Export CSV</button>' +
+    '<button class="fsbtn" id="fsBookCsvIn">&#128229; Import CSV</button></div>';
+
+  /* Say honestly how much is still blank rather than implying the book is ready. */
+  if (st.itemsBlank || st.ratesBlank) {
+    html += '<div style="background:#2b2718;border:1px solid #b58900;border-radius:8px;padding:9px 12px;font-size:13px;color:#ffd873;margin-bottom:10px">' +
+      'Prices are blank until someone who knows them fills them in. ' +
+      st.itemsPriced + ' of ' + st.items + ' items priced' +
+      (st.ratesBlank ? ' · ' + st.ratesPriced + ' of ' + st.rates + ' labour rates priced' : '') +
+      '. Blank items still work — they just come through a quote unpriced.</div>';
+  } else if (st.items) {
+    html += '<div style="background:#1c2a1e;border:1px solid #1b8a3f;border-radius:8px;padding:9px 12px;font-size:13px;color:#8fe0a4;margin-bottom:10px">Everything is priced.</div>';
+  }
+
+  const tabs = [["items", "Items (" + st.items + ")"], ["labour", "Labour (" + st.rates + ")"],
+                ["tasks", "Remedy tasks (" + st.tasks + ")"], ["access", "Access difficulty"]];
+  html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">' +
+    tabs.map(t => '<a class="fsBookTab" data-t="' + t[0] + '" style="cursor:pointer;padding:6px 11px;border-radius:14px;font-size:13px;font-weight:700;' +
+      (fsBookTab === t[0] ? 'background:var(--fs-accent);color:#101214' : 'background:#1a1d21;color:var(--fs-sub)') + '">' + fsEsc(t[1]) + '</a>').join('') + '</div>';
+
+  html += '<div class="fscard" style="padding:14px">';
+
+  if (fsBookTab === "items") {
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="flex:1;font-size:12.5px;color:var(--fs-sub2)">Leave a price blank until you know it. Cost is what you pay, price is what you charge.</div>' +
+      '<button class="fsbtnP" id="fsBookAddItem">&#65291; Add item</button></div>';
+    if (!b.items.length) html += '<div style="color:var(--fs-faint);font-size:13.5px;padding:10px 0">No items yet. Add one, or import a CSV from your supplier or accounting system.</div>';
+    if (b.items.length) {
+      html += '<div style="display:flex;gap:8px;font-size:11px;color:var(--fs-sub2);text-transform:uppercase;letter-spacing:.4px;padding-bottom:5px;border-bottom:1px solid var(--fs-border)">' +
+        '<span style="flex:1">Item</span><span style="width:82px;text-align:right">Cost</span><span style="width:82px;text-align:right">Price</span><span style="width:26px"></span></div>';
+    }
+    b.items.forEach(it => {
+      html += '<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--fs-border)">' +
+        '<span style="flex:1;min-width:0"><input type="text" class="fsBkName" data-id="' + fsEsc(it.id) + '" value="' + fsEsc(it.name || "") + '" placeholder="Item name" style="width:100%;background:#1a1d21;border:1px solid var(--fs-border);border-radius:6px;color:#e8e8e8;padding:5px 7px;font-size:13px">' +
+        '<span style="display:flex;gap:6px;margin-top:4px">' +
+        '<input type="text" class="fsBkCode" data-id="' + fsEsc(it.id) + '" value="' + fsEsc(it.code || "") + '" placeholder="Code" style="width:88px;background:#15181b;border:1px solid var(--fs-border);border-radius:6px;color:var(--fs-sub);padding:3px 6px;font-size:11.5px">' +
+        '<input type="text" class="fsBkCat" data-id="' + fsEsc(it.id) + '" value="' + fsEsc(it.category || "") + '" placeholder="Category" style="flex:1;background:#15181b;border:1px solid var(--fs-border);border-radius:6px;color:var(--fs-sub);padding:3px 6px;font-size:11.5px"></span></span>' +
+        '<span style="width:82px;text-align:right">' + fsMoneyIn("fsBkCost", it.id, it.costCents) + '</span>' +
+        '<span style="width:82px;text-align:right">' + fsMoneyIn("fsBkPrice", it.id, it.unitPriceCents) + '</span>' +
+        '<a class="fsBkDel" data-id="' + fsEsc(it.id) + '" style="width:26px;text-align:center;color:#c62828;cursor:pointer">&#10005;</a></div>';
+    });
+  }
+
+  if (fsBookTab === "labour") {
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="flex:1;font-size:12.5px;color:var(--fs-sub2)">Your charge-out rate per hour. Leave blank until you know it.</div>' +
+      '<button class="fsbtnP" id="fsBookAddRate">&#65291; Add rate</button></div>';
+    if (!b.labourRates.length) html += '<div style="color:var(--fs-faint);font-size:13.5px;padding:10px 0">No labour rates yet.</div>';
+    b.labourRates.forEach(r => {
+      html += '<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--fs-border)">' +
+        '<input type="text" class="fsBkRName" data-id="' + fsEsc(r.id) + '" value="' + fsEsc(r.name || "") + '" placeholder="e.g. Fire technician" style="flex:1;background:#1a1d21;border:1px solid var(--fs-border);border-radius:6px;color:#e8e8e8;padding:5px 7px;font-size:13px">' +
+        '<span style="font-size:12px;color:var(--fs-sub2)">$</span>' + fsMoneyIn("fsBkRate", r.id, r.rateCents) +
+        '<span style="font-size:12px;color:var(--fs-sub2);width:32px">/hr</span>' +
+        '<a class="fsBkRDel" data-id="' + fsEsc(r.id) + '" style="width:26px;text-align:center;color:#c62828;cursor:pointer">&#10005;</a></div>';
+    });
+  }
+
+  if (fsBookTab === "tasks") {
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="flex:1;font-size:12.5px;color:var(--fs-sub2)">A remedy task is a job you do to fix a defect. The minutes are a starting point only — whoever prices the quote confirms them.</div>' +
+      '<button class="fsbtnP" id="fsBookAddTask">&#65291; Add task</button></div>';
+    if (!b.tasks.length) html += '<div style="color:var(--fs-faint);font-size:13.5px;padding:10px 0">No remedy tasks yet.</div>';
+    b.tasks.forEach(t => {
+      html += '<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--fs-border)">' +
+        '<input type="text" class="fsBkTName" data-id="' + fsEsc(t.id) + '" value="' + fsEsc(t.name || "") + '" placeholder="e.g. Replace smoke detector" style="flex:1;background:#1a1d21;border:1px solid var(--fs-border);border-radius:6px;color:#e8e8e8;padding:5px 7px;font-size:13px">' +
+        '<input type="number" class="fsBkTMin" data-id="' + fsEsc(t.id) + '" value="' + (t.baseMinutes == null ? '' : t.baseMinutes) + '" placeholder="—" min="0" style="width:66px;text-align:right;background:#1a1d21;border:1px solid var(--fs-border);border-radius:6px;color:#e8e8e8;padding:5px 6px;font-size:12.5px">' +
+        '<span style="font-size:12px;color:var(--fs-sub2);width:52px">min</span>' +
+        '<a class="fsBkTDel" data-id="' + fsEsc(t.id) + '" style="width:26px;text-align:center;color:#c62828;cursor:pointer">&#10005;</a></div>';
+    });
+  }
+
+  if (fsBookTab === "access") {
+    html += '<div style="font-size:12.5px;color:var(--fs-sub2);margin-bottom:10px">How much longer a job takes because of where the equipment is. ' +
+      '<b style="color:#ffd873">These percentages are starting points, not measured figures</b> — change them to match what the work actually takes you. ' +
+      'Set the access level on a site or building, and the suggested minutes adjust from it.</div>';
+    fsAccessList().forEach((l, i) => {
+      html += '<div style="display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--fs-border)">' +
+        '<span style="flex:1;font-size:13px">' + fsEsc(l.label) + '</span>' +
+        '<input type="number" class="fsBkAcc" data-k="' + fsEsc(l.k) + '" value="' + l.pct + '" min="1" style="width:72px;text-align:right;background:#1a1d21;border:1px solid var(--fs-border);border-radius:6px;color:' + (l.pct === 100 ? 'var(--fs-sub)' : '#ffd873') + ';padding:5px 6px;font-size:12.5px"' + (i === 0 ? ' disabled title="Normal access is the baseline"' : '') + '>' +
+        '<span style="font-size:12px;color:var(--fs-sub2);width:80px">% of base</span></div>';
+    });
+    html += '<div style="margin-top:10px"><a id="fsBkAccReset" style="color:var(--fs-accent);cursor:pointer;font-size:13px">Reset to defaults</a></div>';
+  }
+
+  html += '</div>';
+  html += '<div style="margin-top:10px;font-size:11.5px;color:var(--fs-faint)">Prices are your business data. They travel inside the register file and never leave it.</div>';
+  wrap.innerHTML = html;
+
+  document.getElementById("fsBookBack").onclick = () => { fsDashMode = "sites"; fsDashRender(); };
+  wrap.querySelectorAll(".fsBookTab").forEach(a => a.onclick = () => { fsBookTab = a.dataset.t; fsBookRender(); });
+
+  const find = (arr, id) => arr.filter(x => x.id === id)[0];
+  const bind = (cls, fn) => wrap.querySelectorAll("." + cls).forEach(el => {
+    el.onchange = () => { fn(el); fsMarkDirty(); fsBookRender(); };
+  });
+
+  bind("fsBkName",  el => { const it = find(b.items, el.dataset.id); if (it) it.name = el.value.trim(); });
+  bind("fsBkCode",  el => { const it = find(b.items, el.dataset.id); if (it) it.code = el.value.trim(); });
+  bind("fsBkCat",   el => { const it = find(b.items, el.dataset.id); if (it) it.category = el.value.trim(); });
+  bind("fsBkCost",  el => { const it = find(b.items, el.dataset.id); if (it) it.costCents = fsMoneyOut(el); });
+  bind("fsBkPrice", el => { const it = find(b.items, el.dataset.id); if (it) it.unitPriceCents = fsMoneyOut(el); });
+  bind("fsBkRName", el => { const r = find(b.labourRates, el.dataset.id); if (r) r.name = el.value.trim(); });
+  bind("fsBkRate",  el => { const r = find(b.labourRates, el.dataset.id); if (r) r.rateCents = fsMoneyOut(el); });
+  bind("fsBkTName", el => { const t = find(b.tasks, el.dataset.id); if (t) t.name = el.value.trim(); });
+  bind("fsBkTMin",  el => {
+    const t = find(b.tasks, el.dataset.id); if (!t) return;
+    const v = String(el.value).trim();
+    t.baseMinutes = v === "" ? null : Math.max(0, Math.round(Number(v) || 0));
+  });
+  bind("fsBkAcc", el => {
+    const list = fsAccessList().map(l => ({ k: l.k, label: l.label, pct: l.pct }));
+    const lvl = list.filter(l => l.k === el.dataset.k)[0];
+    if (lvl) lvl.pct = Math.max(1, Math.round(Number(el.value) || 100));
+    b.accessLevels = list;
+  });
+
+  const del = (cls, arr, what) => wrap.querySelectorAll("." + cls).forEach(a => a.onclick = () => {
+    const x = find(arr, a.dataset.id);
+    if (!x) return;
+    if (!confirm("Delete " + what + ' "' + (x.name || "") + '"?')) return;
+    arr.splice(arr.indexOf(x), 1);
+    fsMarkDirty(); fsBookRender();
+  });
+  del("fsBkDel",  b.items,       "item");
+  del("fsBkRDel", b.labourRates, "labour rate");
+  del("fsBkTDel", b.tasks,       "remedy task");
+
+  const addBtn = (id, fn) => { const e = document.getElementById(id); if (e) e.onclick = () => { fn(); fsMarkDirty(); fsBookRender(); }; };
+  addBtn("fsBookAddItem", () => b.items.push({ id: fsBookId("pi"), code: "", name: "", category: "", unit: "ea", costCents: null, unitPriceCents: null, taxCode: "" }));
+  addBtn("fsBookAddRate", () => b.labourRates.push({ id: fsBookId("lr"), name: "", rateCents: null, taxCode: "" }));
+  addBtn("fsBookAddTask", () => b.tasks.push({ id: fsBookId("tk"), name: "", baseMinutes: null, components: [] }));
+  const rst = document.getElementById("fsBkAccReset");
+  if (rst) rst.onclick = () => { b.accessLevels = null; fsMarkDirty(); fsBookRender(); };
+
+  document.getElementById("fsBookCsvOut").onclick = () => {
+    deliverFile(new Blob([FSMoney.itemsToCsv(b.items)], { type: "text/csv" }),
+      "pricebook-" + new Date().toISOString().slice(0, 10) + ".csv", "text/csv");
+  };
+  document.getElementById("fsBookCsvIn").onclick = () => {
+    const inp = document.createElement("input");
+    inp.type = "file"; inp.accept = ".csv,text/csv";
+    inp.onchange = () => {
+      const f = inp.files && inp.files[0];
+      if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        const res = FSMoney.itemsFromCsv(String(rd.result || ""));
+        if (!res.items.length) { alert("Nothing imported.\n\n" + res.errors.join("\n")); return; }
+        const msg = "Import " + res.items.length + " item" + (res.items.length === 1 ? "" : "s") + "?" +
+          (res.errors.length ? "\n\n" + res.errors.length + " row" + (res.errors.length === 1 ? "" : "s") + " had a problem:\n" + res.errors.slice(0, 8).join("\n") : "") +
+          "\n\nThis ADDS to the pricebook. It does not replace what is already there.";
+        if (!confirm(msg)) return;
+        res.items.forEach(it => { it.id = fsBookId("pi"); b.items.push(it); });
+        fsMarkDirty(); fsBookRender();
+      };
+      rd.readAsText(f);
+    };
+    inp.click();
+  };
+}
+/* ===== end pricebook ======================================================= */
+
+
 /* ===== Defect pull-through pipeline =========================================
    A defect only earns anything once it becomes a quote. Everything below ages
    the OPEN defects and surfaces the ones that have gone quiet, so none of them
@@ -7576,6 +8415,7 @@ function fsDashRows() {
 }
 function fsDashRender() {
   if (fsDashMode === "pipeline") return fsPipeRender();
+  if (fsDashMode === "book") return fsBookRender();
   const wrap = document.getElementById("fsDashView");
   const rows = fsDashRows();
   const over = rows.filter(r => r.days !== null && r.days < 0).length;
@@ -7583,7 +8423,7 @@ function fsDashRender() {
   const defs = rows.reduce((a, r) => a + r.def, 0);
   let html = '<div style="margin-bottom:12px"><a id="fsDashBack" class="fsCrumb">&#8592; Clients</a></div>';
   html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px"><h2 style="font-size:20px;flex:1;min-width:150px">&#128202; Portfolio dashboard</h2>' +
-    '<button class="fsbtn" id="fsPipeBtn">&#129518; Defect pipeline</button><button class="fsbtn" id="fsDashPdf">&#128196; PDF</button></div>';
+    '<button class="fsbtn" id="fsPipeBtn">&#129518; Defect pipeline</button><button class="fsbtn" id="fsBookBtn">&#128176; Pricebook</button><button class="fsbtn" id="fsDashPdf">&#128196; PDF</button></div>';
   const chip = (n, lbl, col) => '<div class="fscard" style="flex:1;min-width:110px;padding:12px;text-align:center"><div style="font-size:24px;font-weight:800;color:' + col + '">' + n + '</div><div style="font-size:11.5px;color:var(--fs-sub2)">' + lbl + '</div></div>';
   html += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">' + chip(over, "Overdue", over ? "#c62828" : "#1b8a3f") + chip(soon, "Due within 30 days", soon ? "#b58900" : "#1b8a3f") + chip(defs, "Open defects", defs ? "#c62828" : "#1b8a3f") + '</div>';
   html += '<div class="fscard" style="padding:4px 14px">';
@@ -7600,6 +8440,7 @@ function fsDashRender() {
   document.getElementById("fsDashBack").onclick = () => fsShow("fsClientsView");
   document.getElementById("fsDashPdf").onclick = fsDashPdf;
   document.getElementById("fsPipeBtn").onclick = () => { fsDashMode = "pipeline"; fsPipeRender(); };
+  document.getElementById("fsBookBtn").onclick = () => { fsDashMode = "book"; fsBookRender(); };
   wrap.querySelectorAll(".fsDashRow").forEach(el => el.onclick = () => {
     const r = rows[+el.dataset.i];
     if (!r) return;
@@ -7903,6 +8744,11 @@ function fsRenderTab() {
   if (fsTab === "equip") {
     html += '<div class="fscard" style="padding:20px">';
     html += '<div style="display:flex;align-items:center;margin-bottom:8px"><h3 style="font-size:16px;font-weight:700;flex:1">Site equipment</h3><a id="fsEquipEditBtn" style="color:var(--fs-accent);font-weight:700;cursor:pointer">' + (fsEquipEdit ? 'Save' : 'Edit') + '</a></div>';
+    /* Access difficulty lives HERE, on the place, not on the defect - that
+       detector above the stairwell is awkward every single time. */
+    html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;background:#15181b;border:1px solid var(--fs-border);border-radius:8px;margin-bottom:10px">' +
+      '<span style="font-size:12.5px;color:var(--fs-sub);flex:1;min-width:150px">Getting to the equipment here is normally&hellip;</span>' +
+      fsAccessSelect("fsSiteAccess", fsAccessOf(s)) + '</div>';
     let shown = 0;
     if (fsEquipEdit) html += '<div style="font-size:12.5px;color:var(--fs-sub2);margin-bottom:6px">Tick what the site has — ticked items show on the Overview. Details and photos are optional.</div>';
     fsEquipFields().forEach(k => {
@@ -8233,6 +9079,11 @@ function fsRenderTab() {
   }
 
   if (fsTab === "equip") {
+    const acc = document.getElementById("fsSiteAccess");
+    if (acc) acc.onchange = () => {
+      s.accessDefault = acc.value === "normal" ? "" : acc.value;
+      fsMarkDirty();
+    };
     document.getElementById("fsEquipEditBtn").onclick = () => {
       if (fsEquipEdit) {
         fsSaveEquipDraft();
