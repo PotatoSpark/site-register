@@ -171,7 +171,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.21 (fs 1.19)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.22 (fs 1.20)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -7164,7 +7164,7 @@ async function fsMsRender() {
   document.getElementById("fsMsRefresh").onclick = () => fsMsListRender();
   document.getElementById("fsMsSave").onclick = () => fsMsSaveNow();
   document.getElementById("fsMsProfPut").onclick = () => fsMsPutProfile();
-  try { const me = await fsMsMe(); const n = document.getElementById("fsMsName"); if (n) n.textContent = "— " + (me.userPrincipalName || me.displayName || ""); } catch (e) {}
+  try { const me = await fsMsMe(); fsMsWho = (me.userPrincipalName || me.displayName || ""); const n = document.getElementById("fsMsName"); if (n) n.textContent = "— " + (me.userPrincipalName || me.displayName || ""); } catch (e) {}
   try { await fsMsEnsureWorkspace(); } catch (e) {}
   fsMsListRender();
 }
@@ -7358,6 +7358,197 @@ document.getElementById("fsDashBtn").onclick = async () => {
   fsDashRender();
   fsShow("fsDashView");
 };
+
+/* ===== Defect pull-through pipeline =========================================
+   A defect only earns anything once it becomes a quote. Everything below ages
+   the OPEN defects and surfaces the ones that have gone quiet, so none of them
+   rot unnoticed. STATUS ONLY - never an amount. Prices live in the office
+   accounting system, not in this app, and technicians never see one.
+   Industry term for this is "pull-through". */
+let fsDashMode = "sites";          /* "sites" | "pipeline" */
+let fsPipeUnquotedOnly = true;
+let fsMsWho = "";                  /* signed-in UPN, cached opportunistically */
+
+const FS_QSTATES = [
+  { k: "",         label: "Not quoted", col: "#c62828" },
+  { k: "quoted",   label: "Quoted",     col: "#b58900" },
+  { k: "approved", label: "Approved",   col: "#1b8a3f" },
+  { k: "declined", label: "Declined",   col: "#7a7a7a" }
+];
+/* Absent quoteStatus reads as "not quoted" - no migration needed. */
+function fsQs(d) {
+  const k = (d && d.quoteStatus) || "";
+  for (let i = 0; i < FS_QSTATES.length; i++) if (FS_QSTATES[i].k === k) return FS_QSTATES[i];
+  return FS_QSTATES[0];
+}
+function fsDefDays(d, now) {
+  const t = Date.parse((d && d.created) || "");
+  if (isNaN(t)) return null;
+  const n = (now == null ? Date.now() : now);
+  return Math.floor((n - t) / 86400000);
+}
+const FS_BUCKETS = [
+  { k: "0-30",  label: "0–30 days",   max: 30,  col: "#1b8a3f" },
+  { k: "31-60", label: "31–60 days",  max: 60,  col: "#b58900" },
+  { k: "61-90", label: "61–90 days",  max: 90,  col: "#e07b39" },
+  { k: "90+",   label: "Over 90 days",     max: null, col: "#c62828" }
+];
+function fsDefBucket(days) {
+  if (days == null) return null;
+  for (let i = 0; i < FS_BUCKETS.length; i++) {
+    const m = FS_BUCKETS[i].max;
+    if (m == null || days <= m) return FS_BUCKETS[i];
+  }
+  return FS_BUCKETS[FS_BUCKETS.length - 1];
+}
+/* Who is setting a status. Microsoft sign-in already gives a real identity;
+   it just is not an AUTHORISATION today. When Stage 3 lands, this is the one
+   function that changes - swap the cached UPN for a real role lookup. */
+function fsPipeWho() { return fsMsWho || ""; }
+
+/* Every OPEN defect in the register with enough context to act on it.
+   Recurses buildings because a building holds its own defects. */
+function fsPipeRows(reg, now) {
+  const out = [];
+  ((reg || {}).clients || []).forEach(c => (c.sites || []).forEach(s => {
+    const walk = (node, trail) => {
+      (node.defects || []).forEach(d => {
+        if (d.closed) return;
+        const days = fsDefDays(d, now);
+        out.push({
+          client: c.name || "", site: s.name || "", where: trail,
+          c: c, s: s, node: node, d: d,
+          days: days, bucket: fsDefBucket(days), qs: fsQs(d)
+        });
+      });
+      (node.buildings || []).forEach(b =>
+        walk(b, trail ? trail + " › " + (b.name || "") : (b.name || "")));
+    };
+    walk(s, "");
+  }));
+  /* Oldest first - a nag list in any other order is not a nag list.
+     Undated defects sort last rather than pretending to be new. */
+  out.sort((a, b) => (b.days == null ? -1 : b.days) - (a.days == null ? -1 : a.days));
+  return out;
+}
+function fsCsvCell(v) {
+  const t = String(v == null ? "" : v);
+  return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+}
+function fsPipeCsv(rows) {
+  const head = ["Client", "Site", "Building", "Defect", "Raised", "Age (days)",
+                "Age bucket", "Quote status", "Quote ref", "Status set", "Set by", "Source"];
+  const lines = [head.map(fsCsvCell).join(",")];
+  (rows || []).forEach(r => lines.push([
+    r.client, r.site, r.where, r.d.desc, String(r.d.created || "").slice(0, 10),
+    r.days == null ? "" : r.days, r.bucket ? r.bucket.k : "",
+    r.qs.label, r.d.quoteRef || "", String(r.d.quoteAt || "").slice(0, 10),
+    r.d.quoteBy || "", r.d.source || ""
+  ].map(fsCsvCell).join(",")));
+  /* BOM + CRLF so Excel opens it straight on Windows without an import wizard. */
+  return "﻿" + lines.join("\r\n") + "\r\n";
+}
+function fsPipeDigest(rows, now) {
+  const dt = new Date(now == null ? Date.now() : now);
+  const L = ["DEFECT PULL-THROUGH — " + dt.toISOString().slice(0, 10), ""];
+  const all = rows || [];
+  const unq = all.filter(r => !r.d.quoteStatus);
+  L.push("Open defects: " + all.length);
+  L.push("Not yet quoted: " + unq.length);
+  FS_BUCKETS.forEach(b => {
+    const n = unq.filter(r => r.bucket === b).length;
+    if (n) L.push("  " + b.label + ": " + n);
+  });
+  FS_QSTATES.forEach(q => {
+    if (!q.k) return;
+    const n = all.filter(r => r.d.quoteStatus === q.k).length;
+    if (n) L.push(q.label + ": " + n);
+  });
+  const old = unq.filter(r => r.days != null && r.days > 90);
+  if (old.length) {
+    L.push("", "OVER 90 DAYS AND STILL NOT QUOTED (" + old.length + ")");
+    old.slice(0, 40).forEach(r => L.push("  " + r.days + "d  " + r.site +
+      (r.where ? " / " + r.where : "") + " — " + r.d.desc));
+    if (old.length > 40) L.push("  … and " + (old.length - 40) + " more");
+  }
+  if (!unq.length) L.push("", "Nothing unquoted. Pipeline is clear.");
+  return L.join("\n");
+}
+/* ===== end defect pull-through pipeline ==================================== */
+
+
+/* The nag list. Lives inside the Portfolio dashboard, so it inherits the
+   existing adminPin gate - office-side by construction. */
+function fsPipeRender() {
+  const wrap = document.getElementById("fsDashView");
+  const all = fsPipeRows(fsRegister);
+  const rows = fsPipeUnquotedOnly ? all.filter(r => !r.d.quoteStatus) : all;
+  const unq = all.filter(r => !r.d.quoteStatus);
+  const aged = unq.filter(r => r.days != null && r.days > 90);
+  let html = '<div style="margin-bottom:12px"><a id="fsPipeBack" class="fsCrumb">&#8592; Portfolio dashboard</a></div>';
+  html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">' +
+    '<h2 style="font-size:20px;flex:1;min-width:150px">&#129518; Defect pipeline</h2>' +
+    '<button class="fsbtn" id="fsPipeCsvBtn">&#128202; CSV</button>' +
+    '<button class="fsbtn" id="fsPipeDigBtn">&#128196; Digest</button></div>';
+  const chip = (n, lbl, col) => '<div class="fscard" style="flex:1;min-width:110px;padding:12px;text-align:center"><div style="font-size:24px;font-weight:800;color:' + col + '">' + n + '</div><div style="font-size:11.5px;color:var(--fs-sub2)">' + lbl + '</div></div>';
+  html += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">' +
+    chip(all.length, "Open defects", all.length ? "#c62828" : "#1b8a3f") +
+    chip(unq.length, "Not quoted", unq.length ? "#b58900" : "#1b8a3f") +
+    chip(aged.length, "Unquoted over 90d", aged.length ? "#c62828" : "#1b8a3f") + '</div>';
+  html += '<label style="display:flex;gap:8px;align-items:center;cursor:pointer;margin-bottom:10px;font-size:13.5px">' +
+    '<input type="checkbox" id="fsPipeFilter"' + (fsPipeUnquotedOnly ? ' checked' : '') + '> Show only defects that have not been quoted</label>';
+  html += '<div class="fscard" style="padding:4px 14px">';
+  if (!rows.length) {
+    html += '<div style="color:var(--fs-faint);font-size:13.5px;padding:14px 0">' +
+      (all.length ? 'Every open defect has a quote status. Nothing rotting.' : 'No open defects in this register.') + '</div>';
+  }
+  rows.forEach((r, i) => {
+    const bk = r.bucket, qs = r.qs;
+    html += '<div style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;' + (i ? 'border-top:1px solid var(--fs-border);' : '') + '">' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="font-size:14px;font-weight:600">' + fsEsc(r.d.desc) + '</div>' +
+        '<div style="font-size:12px;color:var(--fs-sub2)">' + fsEsc(r.site) +
+          (r.where ? ' &middot; ' + fsEsc(r.where) : '') + ' &middot; ' + fsEsc(r.client) + '</div>' +
+        '<div style="margin-top:4px;display:flex;gap:7px;flex-wrap:wrap;align-items:center">' +
+          (bk ? '<span style="font-size:11px;font-weight:700;color:' + bk.col + '">' + r.days + ' days open</span>'
+              : '<span style="font-size:11px;color:var(--fs-faint)">no raised date</span>') +
+          (r.d.quoteRef ? '<span style="font-size:11px;color:var(--fs-sub2)">ref ' + fsEsc(r.d.quoteRef) + '</span>' : '') +
+          (r.d.quoteAt ? '<span style="font-size:11px;color:var(--fs-faint)">set ' + fsEsc(String(r.d.quoteAt).slice(0, 10)) +
+             (r.d.quoteBy ? ' by ' + fsEsc(r.d.quoteBy) : '') + '</span>' : '') +
+        '</div></div>' +
+      '<select class="fsPipeQs" data-i="' + i + '" style="background:#1a1d21;border:1px solid ' + qs.col + ';border-radius:6px;color:' + qs.col + ';font-weight:700;padding:5px 7px;font-size:12.5px;flex:none">' +
+        FS_QSTATES.map(q => '<option value="' + q.k + '"' + (q.k === qs.k ? ' selected' : '') + '>' + q.label + '</option>').join('') +
+      '</select></div>';
+  });
+  html += '</div>';
+  html += '<div style="margin-top:10px;font-size:11.5px;color:var(--fs-faint)">Status only — no prices are stored in this app. Technicians see the status on the site Defects tab but cannot change it here.</div>';
+  wrap.innerHTML = html;
+  document.getElementById("fsPipeBack").onclick = () => { fsDashMode = "sites"; fsDashRender(); };
+  document.getElementById("fsPipeFilter").onchange = e => { fsPipeUnquotedOnly = !!e.target.checked; fsPipeRender(); };
+  document.getElementById("fsPipeCsvBtn").onclick = () => {
+    deliverFile(new Blob([fsPipeCsv(all)], { type: "text/csv" }),
+      "defect-pipeline-" + new Date().toISOString().slice(0, 10) + ".csv", "text/csv");
+  };
+  document.getElementById("fsPipeDigBtn").onclick = () => {
+    deliverFile(new Blob([fsPipeDigest(all)], { type: "text/plain" }),
+      "defect-digest-" + new Date().toISOString().slice(0, 10) + ".txt", "text/plain");
+  };
+  wrap.querySelectorAll(".fsPipeQs").forEach(sel => sel.onchange = () => {
+    const r = rows[+sel.dataset.i];
+    if (!r) return;
+    const k = sel.value;
+    r.d.quoteStatus = k || null;
+    r.d.quoteAt = new Date().toISOString();
+    r.d.quoteBy = fsPipeWho();
+    if (k === "quoted" || k === "approved") {
+      const ref = prompt("Quote reference (optional) — your quote number from the accounting system:", r.d.quoteRef || "");
+      if (ref !== null) r.d.quoteRef = String(ref).trim();
+    }
+    fsMarkDirty();
+    fsPipeRender();
+  });
+}
+
 function fsDashRows() {
   const rows = [];
   (fsRegister.clients || []).forEach(c => (c.sites || []).forEach(s => {
@@ -7384,6 +7575,7 @@ function fsDashRows() {
   return rows;
 }
 function fsDashRender() {
+  if (fsDashMode === "pipeline") return fsPipeRender();
   const wrap = document.getElementById("fsDashView");
   const rows = fsDashRows();
   const over = rows.filter(r => r.days !== null && r.days < 0).length;
@@ -7391,7 +7583,7 @@ function fsDashRender() {
   const defs = rows.reduce((a, r) => a + r.def, 0);
   let html = '<div style="margin-bottom:12px"><a id="fsDashBack" class="fsCrumb">&#8592; Clients</a></div>';
   html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px"><h2 style="font-size:20px;flex:1;min-width:150px">&#128202; Portfolio dashboard</h2>' +
-    '<button class="fsbtn" id="fsDashPdf">&#128196; PDF</button></div>';
+    '<button class="fsbtn" id="fsPipeBtn">&#129518; Defect pipeline</button><button class="fsbtn" id="fsDashPdf">&#128196; PDF</button></div>';
   const chip = (n, lbl, col) => '<div class="fscard" style="flex:1;min-width:110px;padding:12px;text-align:center"><div style="font-size:24px;font-weight:800;color:' + col + '">' + n + '</div><div style="font-size:11.5px;color:var(--fs-sub2)">' + lbl + '</div></div>';
   html += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">' + chip(over, "Overdue", over ? "#c62828" : "#1b8a3f") + chip(soon, "Due within 30 days", soon ? "#b58900" : "#1b8a3f") + chip(defs, "Open defects", defs ? "#c62828" : "#1b8a3f") + '</div>';
   html += '<div class="fscard" style="padding:4px 14px">';
@@ -7407,6 +7599,7 @@ function fsDashRender() {
   wrap.innerHTML = html;
   document.getElementById("fsDashBack").onclick = () => fsShow("fsClientsView");
   document.getElementById("fsDashPdf").onclick = fsDashPdf;
+  document.getElementById("fsPipeBtn").onclick = () => { fsDashMode = "pipeline"; fsPipeRender(); };
   wrap.querySelectorAll(".fsDashRow").forEach(el => el.onclick = () => {
     const r = rows[+el.dataset.i];
     if (!r) return;
@@ -7798,12 +7991,20 @@ function fsRenderTab() {
     const defs = (s.defects || []);
     const open = defs.filter(d => !d.closed), closed = defs.filter(d => d.closed);
     html += '<div class="fscard" style="padding:20px">';
-    html += '<h3 style="font-size:16px;font-weight:700;margin-bottom:8px">Defects <span style="color:' + (open.length ? '#c62828' : 'var(--fs-sub2)') + ';font-size:13px">(' + open.length + ' open)</span></h3>';
-    if (!defs.length) html += '<div style="color:var(--fs-faint);font-size:13.5px">No defects recorded. Failed checklist items and failed devices from tests carry forward here until rectified.</div>';
+    html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">' +
+      '<h3 style="font-size:16px;font-weight:700;flex:1;min-width:120px">Defects <span style="color:' + (open.length ? '#c62828' : 'var(--fs-sub2)') + ';font-size:13px">(' + open.length + ' open)</span></h3>' +
+      '<button class="fsbtnP" id="fsDefAddBtn">&#65291; Raise defect</button></div>';
+    if (!defs.length) html += '<div style="color:var(--fs-faint);font-size:13.5px">No defects recorded. Failed checklist items and failed devices from tests carry forward here until rectified, and you can log one yourself with &#65291; Raise defect.</div>';
     open.forEach(d => {
+      const dys = fsDefDays(d), bk = fsDefBucket(dys), qs = fsQs(d);
       html += '<div style="border-top:1px solid var(--fs-border);padding:10px 0;display:flex;gap:10px;align-items:flex-start">' +
         '<div style="flex:1"><div style="font-size:14px;font-weight:600">' + fsEsc(d.desc) + '</div>' +
-        '<div style="font-size:12px;color:var(--fs-sub2)">' + fsEsc((d.created || "").slice(0, 10)) + ' &middot; ' + fsEsc(d.source || "") + (d.lastSeen ? ' &middot; <span style="color:#c62828">still failing ' + fsEsc(d.lastSeen) + '</span>' : '') + '</div></div>' +
+        '<div style="font-size:12px;color:var(--fs-sub2)">' + fsEsc((d.created || "").slice(0, 10)) + ' &middot; ' + fsEsc(d.source || "") + (d.lastSeen ? ' &middot; <span style="color:#c62828">still failing ' + fsEsc(d.lastSeen) + '</span>' : '') + '</div>' +
+        '<div style="margin-top:5px;display:flex;gap:7px;flex-wrap:wrap;align-items:center">' +
+          (bk ? '<span style="font-size:11px;font-weight:700;color:' + bk.col + '">' + dys + ' days open</span>' : '') +
+          '<span class="fsDefQs" style="font-size:11px;font-weight:800;color:#fff;background:' + qs.col + ';border-radius:11px;padding:1px 9px">' + fsEsc(qs.label) + '</span>' +
+          (d.quoteRef ? '<span style="font-size:11px;color:var(--fs-sub2)">ref ' + fsEsc(d.quoteRef) + '</span>' : '') +
+        '</div></div>' +
         '<button class="fsbtn fsDefFix" data-id="' + fsEsc(d.id) + '" style="color:#1b8a3f;font-weight:700">&#10003; Rectified</button></div>';
     });
     if (closed.length) {
@@ -7813,6 +8014,7 @@ function fsRenderTab() {
       });
       html += '</details>';
     }
+    html += '<div style="margin-top:12px;font-size:11.5px;color:var(--fs-faint)">Quote status is set by the office from the Portfolio dashboard. No prices are held in this app.</div>';
     html += '</div>';
   }
   if (fsTab === "qr") {
@@ -7996,6 +8198,21 @@ function fsRenderTab() {
   }
 
   if (fsTab === "defects") {
+    const addB = document.getElementById("fsDefAddBtn");
+    if (addB) addB.onclick = () => {
+      const t = prompt("Describe the defect \u2014 what is wrong, and where?");
+      if (t === null) return;
+      const desc = String(t).trim();
+      if (!desc) { alert("Nothing entered \u2014 no defect raised."); return; }
+      s.defects = s.defects || [];
+      /* key "" so a later test that raises the same wording de-duplicates onto
+         this one instead of creating a second copy (see addDef). */
+      s.defects.push({ id: "d" + Date.now() + Math.random().toString(16).slice(2, 6),
+        key: "", created: new Date().toISOString(), source: "Raised manually",
+        desc: desc, closed: null, quoteStatus: null });
+      fsMarkDirty();
+      fsRenderSite();
+    };
     document.querySelectorAll(".fsDefFix").forEach(b => b.onclick = () => {
       const d = (s.defects || []).find(x => x.id === b.dataset.id);
       if (!d) return;
@@ -9461,7 +9678,7 @@ function fsFinishTest() {
   const addDef = (key, desc) => {
     const ex = openDefs.find(d => (d.key && d.key === key) || (!d.key && d.desc === desc));
     if (ex) { ex.lastSeen = rec.finished.slice(0, 10); ex.seen = (ex.seen || 1) + 1; dedup++; return; }
-    site.defects.push({ id: mkid(), key: key, created: rec.finished, source: def.label + " test", desc: desc, closed: null });
+    site.defects.push({ id: mkid(), key: key, created: rec.finished, source: def.label + " test", desc: desc, closed: null, quoteStatus: null });
   };
   fails.forEach(x => addDef("ck:" + x.k, "Checklist " + x.k + " failed: " + x.t + (x.note ? " — " + x.note : "")));
   failedDev.forEach(d => addDef("dev:" + d.level + ":" + d.type + ":" + (d.zone || "") + ":" + (d.loop || "") + ":" + (d.dev || ""),
