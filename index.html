@@ -171,7 +171,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.26 (fs 1.24)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.27 (fs 1.25)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -523,6 +523,48 @@
     <div class="row">
       <button class="btn" id="fsQiCancel">Cancel</button>
       <button class="btn primary" id="fsQiSave">Save</button>
+    </div>
+  </div>
+</div>
+<div class="modal" id="fsDefectModal" style="z-index:123" data-cls="">
+  <div class="modalbox" style="max-width:480px;width:94vw;text-align:left;max-height:92vh;overflow:auto">
+    <h3 style="margin-bottom:2px">Raise a defect</h3>
+    <div id="fsDfCtx" style="font-size:12px;color:#8fa2ab;margin-bottom:8px"></div>
+    <div id="fsDfNote" style="font-size:12px;margin-bottom:6px"></div>
+
+    <label>What kind of defect <span style="color:#c62828">*</span></label>
+    <select id="fsDfType" style="width:100%;background:#1a1d21;border:1px solid #444;border-radius:6px;color:#e8e8e8;padding:9px;font-size:14px"></select>
+    <div id="fsDfTypeOtherWrap" style="display:none;margin-top:6px">
+      <input type="text" id="fsDfTypeOther" autocomplete="off" placeholder="Describe the kind of defect">
+    </div>
+
+    <label style="margin-top:10px">Where is it <span style="color:#c62828">*</span></label>
+    <input type="text" id="fsDfLoc" autocomplete="off" placeholder="e.g. Level 2 corridor, outside room 214">
+
+    <label style="margin-top:10px">How serious <span style="color:#c62828">*</span></label>
+    <div style="display:flex;gap:6px;flex-wrap:wrap" id="fsDfClsRow"></div>
+    <div id="fsDfClsNote" style="font-size:11.5px;color:var(--fs-sub2);margin-top:6px;line-height:1.45"></div>
+
+    <label style="margin-top:10px">Photo</label>
+    <img id="fsDfPhotoPrev" style="display:none;max-width:140px;max-height:140px;border:1px solid #555;border-radius:6px;margin:4px 0">
+    <div style="display:flex;gap:8px">
+      <button class="btn" id="fsDfPhotoAdd" type="button">&#128247; Add photo</button>
+      <button class="btn" id="fsDfPhotoRemove" type="button" style="display:none">Remove</button>
+    </div>
+    <input type="file" id="fsDfPhotoInput" accept="image/*" capture="environment" style="display:none">
+
+    <label style="margin-top:10px">Anything else worth noting</label>
+    <input type="text" id="fsDfDesc" autocomplete="off" placeholder="Optional">
+
+    <label style="margin-top:10px">What needs to be done about it</label>
+    <input type="text" id="fsDfAction" autocomplete="off" placeholder="Optional — prefilled from the defect type">
+
+    <label style="margin-top:10px">AS 1851 section</label>
+    <input type="text" id="fsDfClause" autocomplete="off" placeholder="Optional — the section this falls under">
+
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="fsDfCancel" type="button">Cancel</button>
+      <button class="btn primary" id="fsDfSave" type="button">Raise defect</button>
     </div>
   </div>
 </div>
@@ -8214,7 +8256,8 @@ function fsBookRender() {
   }
 
   const tabs = [["items", "Items (" + st.items + ")"], ["labour", "Labour (" + st.rates + ")"],
-                ["tasks", "Remedy tasks (" + st.tasks + ")"], ["access", "Access difficulty"]];
+                ["tasks", "Remedy tasks (" + st.tasks + ")"],
+                ["deftypes", "Defect types (" + fsDefTypes().length + ")"], ["access", "Access difficulty"]];
   html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">' +
     tabs.map(t => '<a class="fsBookTab" data-t="' + t[0] + '" style="cursor:pointer;padding:6px 11px;border-radius:14px;font-size:13px;font-weight:700;' +
       (fsBookTab === t[0] ? 'background:var(--fs-accent);color:#101214' : 'background:#1a1d21;color:var(--fs-sub)') + '">' + fsEsc(t[1]) + '</a>').join('') + '</div>';
@@ -8271,6 +8314,33 @@ function fsBookRender() {
         '<input type="number" class="fsBkTMin" data-id="' + fsEsc(t.id) + '" value="' + (t.baseMinutes == null ? '' : t.baseMinutes) + '" placeholder="—" min="0" style="width:66px;text-align:right;background:#1a1d21;border:1px solid var(--fs-border);border-radius:6px;color:#e8e8e8;padding:5px 6px;font-size:12.5px">' +
         '<span style="font-size:12px;color:var(--fs-sub2);width:52px">min</span>' +
         '<a class="fsBkTDel" data-id="' + fsEsc(t.id) + '" style="width:26px;text-align:center;color:#c62828;cursor:pointer">&#10005;</a></div>';
+    });
+  }
+
+  if (fsBookTab === "deftypes") {
+    const dts = fsDefTypes();
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap"><div style="flex:1;min-width:180px;font-size:12.5px;color:var(--fs-sub2)">What a technician picks from when raising a defect. Choosing a type fills in how serious it is and what needs doing, so a defect takes two taps instead of five.</div>' +
+      '<button class="fsbtn" id="fsBookLoadDT">&#128218; Load starter list</button>' +
+      '<button class="fsbtnP" id="fsBookAddDT">&#65291; Add type</button></div>';
+    if (!dts.length) {
+      html += '<div style="background:#15181b;border:1px solid var(--fs-border);border-radius:8px;padding:11px 13px;margin-bottom:10px;font-size:13px;color:var(--fs-sub)">' +
+        '<b style="color:#e8e8e8">Nothing here yet.</b> Load the starter list and edit it. The class on each type is a <b>starting point</b> the technician confirms on the form, ' +
+        'and the AS 1851 section is deliberately left blank — fill it in yourself rather than trusting a guess on a compliance record.</div>';
+    }
+    dts.forEach(t => {
+      const c = fsDefCls(t.cls);
+      html += '<div style="padding:8px 0;border-bottom:1px solid var(--fs-border)">' +
+        '<div style="display:flex;gap:8px;align-items:center">' +
+        '<input type="text" class="fsDtName" data-id="' + fsEsc(t.id) + '" value="' + fsEsc(t.name || "") + '" placeholder="Defect type" style="flex:1;background:#1a1d21;border:1px solid var(--fs-border);border-radius:6px;color:#e8e8e8;padding:5px 7px;font-size:13px">' +
+        '<select class="fsDtCls" data-id="' + fsEsc(t.id) + '" style="background:#1a1d21;border:1px solid ' + (c ? c.col : "var(--fs-border)") + ';border-radius:6px;color:' + (c ? c.col : "var(--fs-sub)") + ';font-weight:700;padding:5px 6px;font-size:12px">' +
+          '<option value="">Not set</option>' +
+          FS_DEF_CLASSES.map(x => '<option value="' + x.k + '"' + (x.k === t.cls ? ' selected' : '') + '>' + fsEsc(x.short) + '</option>').join('') +
+        '</select>' +
+        '<a class="fsDtDel" data-id="' + fsEsc(t.id) + '" style="width:24px;text-align:center;color:#c62828;cursor:pointer">&#10005;</a></div>' +
+        '<div style="display:flex;gap:6px;margin-top:4px">' +
+        '<input type="text" class="fsDtAct" data-id="' + fsEsc(t.id) + '" value="' + fsEsc(t.action || "") + '" placeholder="What needs doing about it" style="flex:1;background:#15181b;border:1px solid var(--fs-border);border-radius:6px;color:var(--fs-sub);padding:3px 6px;font-size:11.5px">' +
+        '<input type="text" class="fsDtCl" data-id="' + fsEsc(t.id) + '" value="' + fsEsc(t.clause || "") + '" placeholder="AS 1851 section" style="width:120px;background:#15181b;border:1px solid var(--fs-border);border-radius:6px;color:var(--fs-sub);padding:3px 6px;font-size:11.5px">' +
+        '</div></div>';
     });
   }
 
@@ -8334,6 +8404,20 @@ function fsBookRender() {
   addBtn("fsBookAddItem", () => b.items.push({ id: fsBookId("pi"), code: "", name: "", category: "", unit: "ea", costCents: null, unitPriceCents: null, taxCode: "" }));
   addBtn("fsBookAddRate", () => b.labourRates.push({ id: fsBookId("lr"), name: "", rateCents: null, taxCode: "" }));
   addBtn("fsBookAddTask", () => b.tasks.push({ id: fsBookId("tk"), name: "", baseMinutes: null, components: [] }));
+  addBtn("fsBookAddDT", () => fsDefTypes().push({ id: fsBookId("dt"), name: "", cls: "", action: "", desc: "", clause: "" }));
+  const loadDT = document.getElementById("fsBookLoadDT");
+  if (loadDT) loadDT.onclick = () => {
+    const res = fsDefTypeLibLoad("fire");
+    alert("\u2713 " + res.added + " defect type" + (res.added === 1 ? "" : "s") + " added." +
+      (res.skipped ? "\n" + res.skipped + " already in your list and left alone." : "") +
+      "\n\nThe class on each one is a STARTING POINT — change anything that is wrong, and fill in the AS 1851 section yourself.");
+    fsMarkDirty(); fsBookRender();
+  };
+  bind("fsDtName", el => { const t = fsDefTypeFind(el.dataset.id); if (t) t.name = el.value.trim(); });
+  bind("fsDtCls",  el => { const t = fsDefTypeFind(el.dataset.id); if (t) t.cls = el.value; });
+  bind("fsDtAct",  el => { const t = fsDefTypeFind(el.dataset.id); if (t) t.action = el.value.trim(); });
+  bind("fsDtCl",   el => { const t = fsDefTypeFind(el.dataset.id); if (t) t.clause = el.value.trim(); });
+  del("fsDtDel", fsDefTypes(), "defect type");
   const loadT = document.getElementById("fsBookLoadTasks");
   if (loadT) loadT.onclick = () => {
     const lines = FS_TASK_LIBS.map((l, i) => "  " + (i + 1) + ". " + l.label + " (" + l.tasks.length + " tasks)").join("\n");
@@ -8381,6 +8465,320 @@ function fsBookRender() {
 }
 /* ===== end pricebook ======================================================= */
 
+
+
+
+/* ===== AS 1851 defect classification + notification clock ====================
+   Three classes are defined by AS 1851-2012 cl.1.5.6. "Recommendation" is a
+   fourth category used on FPA Australia logbooks that is NOT in the standard -
+   it is marked as such everywhere it appears.
+
+   Notification deadlines come from cl.1.17.1. They are deadlines to TELL the
+   responsible entity, not deadlines to FIX anything. The standard sets no
+   rectification clock and this app must never imply one. */
+
+const FS_DEF_CLASSES = [
+  { k: "critical",       code: 1, label: "Critical defect",  short: "Critical",
+    col: "#c62828", photo: true,
+    notifyH: 24, notifyText: "Tell the responsible entity before you leave site, then confirm in writing within 24 hours. Re-confirm every time it is found again.",
+    desc: "Renders the system inoperable and is reasonably likely to significantly affect occupant safety in a fire.", std: true },
+  { k: "noncritical",    code: 2, label: "Non-critical defect", short: "Non-critical",
+    col: "#b58900", photo: true,
+    notifyH: 168, notifyText: "Tell the responsible entity within one week.",
+    desc: "An impairment or faulty component not likely to critically affect how the system operates.", std: true },
+  { k: "nonconformance", code: 3, label: "Non-conformance", short: "Non-conformance",
+    col: "#4a90d9", photo: false,
+    notifyH: 168, notifyText: "Tell the responsible entity within one week.",
+    desc: "Information missing or a feature incorrect. Does not affect operation but is needed to support ongoing servicing.", std: true },
+  { k: "recommendation", code: 0, label: "Recommendation", short: "Recommendation",
+    col: "#7a7a7a", photo: false,
+    notifyH: null, notifyText: "No notification deadline. This is not an AS 1851 defect class.",
+    desc: "Suggested work. Not a defect class under AS 1851 — used on industry logbooks.", std: false }
+];
+function fsDefCls(k) {
+  for (let i = 0; i < FS_DEF_CLASSES.length; i++) if (FS_DEF_CLASSES[i].k === k) return FS_DEF_CLASSES[i];
+  return null;   /* an unclassified defect is NOT silently called non-critical */
+}
+
+/* When the responsible entity must have been told. Null when there is no
+   deadline, or when the defect has not been classified yet. */
+function fsDefNotifyDue(d) {
+  if (!d) return null;
+  const c = fsDefCls(d.cls);
+  if (!c || c.notifyH == null) return null;
+  const t = Date.parse(d.created || "");
+  if (isNaN(t)) return null;
+  return t + c.notifyH * 3600000;
+}
+/* Where the defect stands against that deadline. `done` once it has been
+   confirmed in writing - which is what cl.1.17.1 actually asks for. */
+function fsDefNotifyState(d, now) {
+  const due = fsDefNotifyDue(d);
+  if (due == null) return { state: "none" };
+  const n = (now == null ? Date.now() : now);
+  const nt = d.notify || {};
+  if (nt.writtenAt) return { state: "done", due: due, at: nt.writtenAt };
+  const left = due - n;
+  return {
+    state: left < 0 ? "overdue" : (left < 4 * 3600000 ? "soon" : "open"),
+    due: due, hoursLeft: Math.floor(left / 3600000), onSite: !!nt.onSite
+  };
+}
+function fsDefNotifyLabel(d, now) {
+  const st = fsDefNotifyState(d, now);
+  if (st.state === "none") return null;
+  if (st.state === "done") return { txt: "Notified in writing " + String(st.at).slice(0, 10), col: "#1b8a3f" };
+  const c = fsDefCls(d.cls);
+  const h = st.hoursLeft;
+  if (st.state === "overdue") {
+    return { txt: "Notification OVERDUE by " + fsDefDur(-h) + (c.k === "critical" ? " (24 h written confirmation)" : " (one week)"), col: "#c62828" };
+  }
+  return { txt: "Notify in writing within " + fsDefDur(h), col: st.state === "soon" ? "#c62828" : "#b58900" };
+}
+function fsDefDur(h) {
+  if (h < 1) return "under an hour";
+  if (h < 48) return h + " hour" + (h === 1 ? "" : "s");
+  return Math.floor(h / 24) + " days";
+}
+
+/* ---- defect TYPES: a picklist that prefills, per Uptick and Simpro -------- */
+function fsDefTypes() {
+  const b = fsBook();
+  if (!b) return [];
+  b.defectTypes = b.defectTypes || [];
+  return b.defectTypes;
+}
+function fsDefTypeFind(id) { return fsDefTypes().filter(t => t.id === id)[0] || null; }
+/* ===== end AS 1851 defect classification ==================================== */
+
+
+/* Starter defect types. NAMES, CLASS and ACTION only — the AS 1851 section is
+   deliberately left BLANK because Claude cannot verify which section each falls
+   under, and a wrong clause reference on a compliance record is worse than none.
+   Every field here is editable, and the CLASS is a starting point the technician
+   confirms on the form. Loaded from Pricebook -> Defect types. */
+const FS_DEFTYPE_LIBS = [
+  { key: "fire", label: "Fire", types: [
+    ["Panel in fault", "critical", "Attend, diagnose and restore the panel to normal"],
+    ["Panel or zone isolated", "critical", "Restore to service, or notify the responsible entity of the isolation"],
+    ["System inoperable", "critical", "Restore the system to service"],
+    ["Fire pump will not start", "critical", "Attend and repair the pump set"],
+    ["No water to hydrant or hose reel", "critical", "Restore water supply"],
+    ["EWIS or OWS inoperable", "critical", "Attend and restore the occupant warning system"],
+    ["Suppression system disabled", "critical", "Restore the suppression system to service"],
+    ["Fire door blocked or will not close", "critical", "Clear the obstruction and make the door self-close"],
+    ["Exit blocked or locked", "critical", "Clear the exit and remove the locking device"],
+    ["Detector faulty", "noncritical", "Replace the detector"],
+    ["Detector missing", "noncritical", "Install a replacement detector"],
+    ["Detector contaminated or dusty", "noncritical", "Clean and re-test, replace if it still fails"],
+    ["Sounder faulty", "noncritical", "Replace the sounder"],
+    ["Manual call point faulty", "noncritical", "Repair or replace the call point"],
+    ["Exit light not illuminated", "noncritical", "Repair or replace the exit light"],
+    ["Emergency light failed duration test", "noncritical", "Replace the battery or the fitting"],
+    ["Extinguisher missing", "noncritical", "Supply and install a replacement extinguisher"],
+    ["Extinguisher discharged or low pressure", "noncritical", "Recharge or replace the extinguisher"],
+    ["Extinguisher overdue pressure test", "noncritical", "Pressure test or replace the extinguisher"],
+    ["Hose reel leaking", "noncritical", "Repair the leak"],
+    ["Hose reel nozzle missing or damaged", "noncritical", "Replace the nozzle"],
+    ["Hydrant or booster leaking", "noncritical", "Repair the leak"],
+    ["Sprinkler head painted or obstructed", "noncritical", "Replace the head and clear the obstruction"],
+    ["Sprinkler head damaged or corroded", "noncritical", "Replace the sprinkler head"],
+    ["Booster cap or blank missing", "noncritical", "Supply and fit a replacement"],
+    ["Panel battery failed", "noncritical", "Replace the panel battery set"],
+    ["Door closer faulty", "noncritical", "Repair or replace the door closer"],
+    ["Smoke or intumescent seal damaged", "noncritical", "Replace the seal"],
+    ["Signage missing or incorrect", "nonconformance", "Supply and install correct signage"],
+    ["Block plan missing or out of date", "nonconformance", "Produce and install an updated block plan"],
+    ["Equipment not tagged", "nonconformance", "Tag the equipment"],
+    ["Logbook missing or incomplete", "nonconformance", "Supply a logbook and bring the records up to date"],
+    ["Asset not recorded in the register", "nonconformance", "Add the asset to the register"],
+    ["Access to equipment obstructed", "nonconformance", "Clear access to the equipment"],
+    ["Incorrect equipment installed", "nonconformance", "Replace with the correct equipment for the application"],
+    ["Equipment ageing, replacement recommended", "recommendation", "Quote for replacement"],
+    ["Upgrade recommended", "recommendation", "Quote for the upgrade"],
+    ["Housekeeping", "recommendation", "Advise the site"],
+  ] },
+];
+
+function fsDefTypeLibLoad(key) {
+  const lib = FS_DEFTYPE_LIBS.filter(l => l.key === key)[0], arr = fsDefTypes();
+  if (!lib) return { added: 0, skipped: 0 };
+  const have = Object.create(null);
+  arr.forEach(t => { have[String(t.name || "").trim().toLowerCase()] = 1; });
+  let added = 0, skipped = 0;
+  lib.types.forEach(p => {
+    const nm = p[0];
+    if (have[nm.trim().toLowerCase()]) { skipped++; return; }
+    have[nm.trim().toLowerCase()] = 1;
+    arr.push({ id: fsBookId("dt"), name: nm, cls: p[1], action: p[2], desc: "", clause: "", lib: key });
+    added++;
+  });
+  return { added: added, skipped: skipped };
+}
+
+/* ===== Raise-defect form =====================================================
+   One screen. Type and Location are required; everything else is prefilled from
+   the type or optional. A photo is required for a critical or non-critical
+   defect and optional for the other two.
+
+   Reached from: the site Defects tab, or a device on the plan - and when it is
+   raised from a device it keeps the tag, so the register can jump straight back
+   to it on the floor plan. */
+
+let fsDfSite = null, fsDfPhoto = null, fsDfQid = "", fsDfNode = null;
+
+function fsDefFormOpen(site, opts) {
+  fsDfSite = site; fsDfPhoto = null;
+  fsDfQid = (opts && opts.qid) || "";
+  fsDfNode = (opts && opts.node) || site;
+  const types = fsDefTypes();
+  const sel = document.getElementById("fsDfType");
+  sel.innerHTML = '<option value="">Choose a defect type…</option>' +
+    types.map(t => '<option value="' + fsEsc(t.id) + '">' + fsEsc(t.name) + '</option>').join('') +
+    '<option value="__other">Something else — I will type it</option>';
+  document.getElementById("fsDfTypeOther").value = "";
+  document.getElementById("fsDfTypeOtherWrap").style.display = "none";
+  document.getElementById("fsDfLoc").value = (opts && opts.location) || "";
+  document.getElementById("fsDfDesc").value = "";
+  document.getElementById("fsDfAction").value = "";
+  document.getElementById("fsDfClause").value = "";
+  const pv = document.getElementById("fsDfPhotoPrev");
+  pv.src = ""; pv.style.display = "none";
+  document.getElementById("fsDfPhotoRemove").style.display = "none";
+  fsDefFormCls("");
+  document.getElementById("fsDfCtx").textContent =
+    (site.name || "") + (fsDfQid ? " · device tag " + fsDfQid : "");
+  document.getElementById("fsDfNote").innerHTML = "";
+  document.getElementById("fsDefectModal").classList.add("show");
+  if (!types.length) {
+    document.getElementById("fsDfNote").innerHTML =
+      '<span style="color:#b58900">No defect types set up yet — choose "Something else" and type it, ' +
+      'or load a starter list from Pricebook &rarr; Defect types.</span>';
+  }
+}
+function fsDefFormCls(k) {
+  document.querySelectorAll(".fsDfCls").forEach(b => {
+    const on = b.dataset.k === k;
+    b.style.background = on ? (b.dataset.col || "#555") : "#1a1d21";
+    b.style.color = on ? "#101214" : "var(--fs-sub)";
+  });
+  document.getElementById("fsDefectModal").dataset.cls = k;
+  const c = fsDefCls(k);
+  const nb = document.getElementById("fsDfClsNote");
+  if (!c) { nb.innerHTML = '<span style="color:#b58900">Pick how serious this is — it sets the notification deadline.</span>'; return; }
+  nb.innerHTML = fsEsc(c.desc) + '<br><b style="color:' + c.col + '">' + fsEsc(c.notifyText) + '</b>' +
+    (c.std ? '' : '<br><i style="color:var(--fs-faint)">Not a defect class under AS 1851.</i>') +
+    (c.photo ? '<br><span style="color:var(--fs-sub2)">A photo is required for this class.</span>' : '');
+}
+function fsDefFormSave() {
+  const site = fsDfSite;
+  if (!site) return;
+  const sel = document.getElementById("fsDfType").value;
+  const other = String(document.getElementById("fsDfTypeOther").value || "").trim();
+  const t = sel && sel !== "__other" ? fsDefTypeFind(sel) : null;
+  const typeName = t ? t.name : other;
+  const loc = String(document.getElementById("fsDfLoc").value || "").trim();
+  const cls = document.getElementById("fsDefectModal").dataset.cls || "";
+  const c = fsDefCls(cls);
+  const miss = [];
+  if (!typeName) miss.push("what kind of defect it is");
+  if (!loc) miss.push("where it is");
+  if (!cls) miss.push("how serious it is");
+  if (c && c.photo && !fsDfPhoto) miss.push("a photo (required for a " + c.short.toLowerCase() + " defect)");
+  if (miss.length) { alert("Still needed:\n\n• " + miss.join("\n• ")); return; }
+  const desc = String(document.getElementById("fsDfDesc").value || "").trim();
+  const d = {
+    id: "d" + Date.now() + Math.random().toString(16).slice(2, 6),
+    key: t ? "type:" + t.id : "",
+    created: new Date().toISOString(),
+    source: "Raised on site",
+    desc: (typeName + (loc ? " — " + loc : "") + (desc ? " — " + desc : "")),
+    closed: null, quoteStatus: null,
+    cls: cls, typeId: t ? t.id : "", typeName: typeName,
+    location: loc, detail: desc,
+    action: String(document.getElementById("fsDfAction").value || "").trim(),
+    clause: String(document.getElementById("fsDfClause").value || "").trim(),
+    photos: fsDfPhoto ? [fsDfPhoto] : [],
+    notify: { onSite: false, at: null, writtenAt: null, by: "" },
+    qid: fsDfQid || "", siteId: site.id || ""
+  };
+  const node = fsDfNode || site;
+  node.defects = node.defects || [];
+  node.defects.push(d);
+  fsMarkDirty();
+  document.getElementById("fsDefectModal").classList.remove("show");
+  if (typeof fsRenderSite === "function" && typeof fsSite !== "undefined" && fsSite) fsRenderSite();
+  const nl = fsDefNotifyLabel(d);
+  alert("✓ Defect raised.\n\n" + d.desc + (nl ? "\n\n" + nl.txt : ""));
+}
+
+/* Jump from a defect in the register to the device on the floor plan.
+   Reuses fsQrGoTo, which is what the QR lookup already does. */
+function fsDefShowInWorkspace(d) {
+  if (!d || !d.qid) return;
+  if (!FS_WS_APP) {
+    alert("The floor-plan workspace is part of the FireSpark app.\n\nOpen this site in FireSpark to see the device on the plan.");
+    return;
+  }
+  const r = fsQrResolve("FS1|" + (d.siteId || "") + "|" + d.qid);
+  if (!r.ok) { alert("Could not find that device on the plan.\n\n" + r.msg); return; }
+  fsQrGoTo(r);
+}
+
+/* ---- raise-defect form wiring ---- */
+(function () {
+  const row = document.getElementById("fsDfClsRow");
+  if (!row) return;
+  row.innerHTML = FS_DEF_CLASSES.map(c =>
+    '<button type="button" class="fsDfCls" data-k="' + c.k + '" data-col="' + c.col + '" ' +
+    'style="cursor:pointer;padding:7px 12px;border-radius:14px;border:1px solid ' + c.col + ';' +
+    'background:#1a1d21;color:var(--fs-sub);font-size:12.5px;font-weight:700">' + c.short + '</button>').join('');
+  row.querySelectorAll(".fsDfCls").forEach(b => b.onclick = () => fsDefFormCls(b.dataset.k));
+
+  document.getElementById("fsDfType").onchange = e => {
+    const v = e.target.value;
+    document.getElementById("fsDfTypeOtherWrap").style.display = v === "__other" ? "block" : "none";
+    const t = v && v !== "__other" ? fsDefTypeFind(v) : null;
+    if (!t) return;
+    /* the type prefills - this is what makes 80 defects take minutes not hours */
+    if (t.cls) fsDefFormCls(t.cls);
+    if (t.desc) document.getElementById("fsDfDesc").value = t.desc;
+    if (t.action) document.getElementById("fsDfAction").value = t.action;
+    if (t.clause) document.getElementById("fsDfClause").value = t.clause;
+  };
+  document.getElementById("fsDfPhotoAdd").onclick = () => document.getElementById("fsDfPhotoInput").click();
+  document.getElementById("fsDfPhotoInput").onchange = e => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      const im = new Image();
+      im.onload = () => {
+        const c = document.createElement("canvas");
+        const sc = Math.min(1, 1400 / Math.max(im.naturalWidth, im.naturalHeight));
+        c.width = Math.round(im.naturalWidth * sc); c.height = Math.round(im.naturalHeight * sc);
+        c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+        fsDfPhoto = c.toDataURL("image/jpeg", 0.82);
+        const pv = document.getElementById("fsDfPhotoPrev");
+        pv.src = fsDfPhoto; pv.style.display = "block";
+        document.getElementById("fsDfPhotoRemove").style.display = "inline-block";
+      };
+      im.onerror = () => alert("Couldn't read that photo (HEIC from the Files app? Convert it to JPEG first).");
+      im.src = rd.result;
+    };
+    rd.readAsDataURL(f);
+  };
+  document.getElementById("fsDfPhotoRemove").onclick = () => {
+    fsDfPhoto = null;
+    document.getElementById("fsDfPhotoPrev").style.display = "none";
+    document.getElementById("fsDfPhotoRemove").style.display = "none";
+  };
+  document.getElementById("fsDfCancel").onclick = () => document.getElementById("fsDefectModal").classList.remove("show");
+  document.getElementById("fsDfSave").onclick = fsDefFormSave;
+})();
+
+/* ===== end raise-defect form ================================================ */
 
 
 /* ===== Quotes - money layer pass 2 ==========================================
@@ -8905,8 +9303,10 @@ function fsPipeRender() {
         '<div style="font-size:12px;color:var(--fs-sub2)">' + fsEsc(r.site) +
           (r.where ? ' &middot; ' + fsEsc(r.where) : '') + ' &middot; ' + fsEsc(r.client) + '</div>' +
         '<div style="margin-top:4px;display:flex;gap:7px;flex-wrap:wrap;align-items:center">' +
+          (fsDefCls(r.d.cls) ? '<span style="font-size:11px;font-weight:800;color:#fff;background:' + fsDefCls(r.d.cls).col + ';border-radius:11px;padding:1px 9px">' + fsEsc(fsDefCls(r.d.cls).short) + '</span>' : '') +
           (bk ? '<span style="font-size:11px;font-weight:700;color:' + bk.col + '">' + r.days + ' days open</span>'
               : '<span style="font-size:11px;color:var(--fs-faint)">no raised date</span>') +
+          (fsDefNotifyLabel(r.d) ? '<span style="font-size:11px;font-weight:700;color:' + fsDefNotifyLabel(r.d).col + '">' + fsEsc(fsDefNotifyLabel(r.d).txt) + '</span>' : '') +
           (r.d.quoteRef ? '<span style="font-size:11px;color:var(--fs-sub2)">ref ' + fsEsc(r.d.quoteRef) + '</span>' : '') +
           (r.d.quoteAt ? '<span style="font-size:11px;color:var(--fs-faint)">set ' + fsEsc(String(r.d.quoteAt).slice(0, 10)) +
              (r.d.quoteBy ? ' by ' + fsEsc(r.d.quoteBy) : '') + '</span>' : '') +
@@ -9417,14 +9817,26 @@ function fsRenderTab() {
     if (!defs.length) html += '<div style="color:var(--fs-faint);font-size:13.5px">No defects recorded. Failed checklist items and failed devices from tests carry forward here until rectified, and you can log one yourself with &#65291; Raise defect.</div>';
     open.forEach(d => {
       const dys = fsDefDays(d), bk = fsDefBucket(dys), qs = fsQs(d);
+      const dc = fsDefCls(d.cls), nl = fsDefNotifyLabel(d);
       html += '<div style="border-top:1px solid var(--fs-border);padding:10px 0;display:flex;gap:10px;align-items:flex-start">' +
+        (d.photos && d.photos.length ? '<img class="fsDefPh" data-id="' + fsEsc(d.id) + '" src="' + d.photos[0] + '" style="width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid var(--fs-border);cursor:pointer;flex:none">' : '') +
         '<div style="flex:1"><div style="font-size:14px;font-weight:600">' + fsEsc(d.desc) + '</div>' +
         '<div style="font-size:12px;color:var(--fs-sub2)">' + fsEsc((d.created || "").slice(0, 10)) + ' &middot; ' + fsEsc(d.source || "") + (d.lastSeen ? ' &middot; <span style="color:#c62828">still failing ' + fsEsc(d.lastSeen) + '</span>' : '') + '</div>' +
+        (d.action ? '<div style="font-size:12px;color:var(--fs-sub);margin-top:3px">Action: ' + fsEsc(d.action) + '</div>' : '') +
         '<div style="margin-top:5px;display:flex;gap:7px;flex-wrap:wrap;align-items:center">' +
+          (dc ? '<span style="font-size:11px;font-weight:800;color:#fff;background:' + dc.col + ';border-radius:11px;padding:1px 9px">' + fsEsc(dc.short) + '</span>'
+              : '<span style="font-size:11px;font-weight:700;color:#b58900">Not classified</span>') +
           (bk ? '<span style="font-size:11px;font-weight:700;color:' + bk.col + '">' + dys + ' days open</span>' : '') +
           '<span class="fsDefQs" style="font-size:11px;font-weight:800;color:#fff;background:' + qs.col + ';border-radius:11px;padding:1px 9px">' + fsEsc(qs.label) + '</span>' +
           (d.quoteRef ? '<span style="font-size:11px;color:var(--fs-sub2)">ref ' + fsEsc(d.quoteRef) + '</span>' : '') +
-        '</div></div>' +
+          (d.clause ? '<span style="font-size:11px;color:var(--fs-sub2)">AS 1851 ' + fsEsc(d.clause) + '</span>' : '') +
+        '</div>' +
+        (nl ? '<div style="margin-top:5px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+          '<span style="font-size:11.5px;font-weight:700;color:' + nl.col + '">' + fsEsc(nl.txt) + '</span>' +
+          (d.notify && d.notify.writtenAt ? '' : '<a class="fsDefNotify" data-id="' + fsEsc(d.id) + '" style="color:var(--fs-accent);cursor:pointer;font-size:11.5px;font-weight:700">Mark notified in writing</a>') +
+          '</div>' : '') +
+        (d.qid ? '<div style="margin-top:5px"><a class="fsDefWs" data-id="' + fsEsc(d.id) + '" style="color:var(--fs-accent);cursor:pointer;font-size:12px;font-weight:700">&#128205; Show me this on the plan</a></div>' : '') +
+        '</div>' +
         '<button class="fsbtn fsDefFix" data-id="' + fsEsc(d.id) + '" style="color:#1b8a3f;font-weight:700">&#10003; Rectified</button></div>';
     });
     if (closed.length) {
@@ -9619,20 +10031,22 @@ function fsRenderTab() {
 
   if (fsTab === "defects") {
     const addB = document.getElementById("fsDefAddBtn");
-    if (addB) addB.onclick = () => {
-      const t = prompt("Describe the defect \u2014 what is wrong, and where?");
-      if (t === null) return;
-      const desc = String(t).trim();
-      if (!desc) { alert("Nothing entered \u2014 no defect raised."); return; }
-      s.defects = s.defects || [];
-      /* key "" so a later test that raises the same wording de-duplicates onto
-         this one instead of creating a second copy (see addDef). */
-      s.defects.push({ id: "d" + Date.now() + Math.random().toString(16).slice(2, 6),
-        key: "", created: new Date().toISOString(), source: "Raised manually",
-        desc: desc, closed: null, quoteStatus: null });
-      fsMarkDirty();
-      fsRenderSite();
-    };
+    if (addB) addB.onclick = () => fsDefFormOpen(s, {});
+    document.querySelectorAll(".fsDefWs").forEach(bn => bn.onclick = () => {
+      const d = (s.defects || []).filter(x => x.id === bn.dataset.id)[0];
+      if (d) fsDefShowInWorkspace(d);
+    });
+    document.querySelectorAll(".fsDefNotify").forEach(bn => bn.onclick = () => {
+      const d = (s.defects || []).filter(x => x.id === bn.dataset.id)[0];
+      if (!d) return;
+      const c = fsDefCls(d.cls);
+      if (!confirm("Record that you have confirmed this in writing to the responsible entity?\n\n" +
+        (c ? c.notifyText : "") + "\n\nThis records the notification only. It does not rectify anything.")) return;
+      d.notify = d.notify || {};
+      d.notify.writtenAt = new Date().toISOString();
+      d.notify.by = fsPipeWho();
+      fsMarkDirty(); fsRenderSite();
+    });
     document.querySelectorAll(".fsDefFix").forEach(b => b.onclick = () => {
       const d = (s.defects || []).find(x => x.id === b.dataset.id);
       if (!d) return;
