@@ -171,7 +171,7 @@
   <div class="wrap">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap">
       <span style="font-size:21px;font-weight:800;color:#c8340f;display:inline-flex;align-items:center;gap:8px"><img src="icon-192.png" style="width:26px;height:26px;border-radius:6px" alt=""> FIRESPARK REGISTER</span>
-      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.29 (fs 1.27)</span>
+      <span id="fsVerBadge" style="font-size:11px;color:#7c8a91">register v1.32 (fs 1.30)</span>
       <span id="fsCoBadge" style="display:none;font-size:12px;font-weight:600;color:#7c8a91;border:1px solid #d5dde1;border-radius:20px;padding:2px 10px"></span>
       <span style="flex:1"></span>
       <button class="fsbtn" id="fsFileBtn" title="Register file &mdash; load, company profile, export one client">&#128193; Register</button>
@@ -795,8 +795,12 @@
       </select>
     </div>
     <div style="margin-bottom:12px">
-      <div style="font-size:13.5px;margin-bottom:5px">Your name (stamped on register saves)</div>
+      <div style="font-size:13.5px;margin-bottom:5px">Your name (stamped on saves, tests and defects)</div>
       <input id="fsSetName" autocomplete="off" style="width:100%;box-sizing:border-box;padding:9px;border-radius:8px;border:1px solid #4a5057;background:#1a1d21;color:#eee;font-size:14px" placeholder="e.g. R. Smith">
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <span style="flex:1;font-size:13.5px">Who did what in this register</span>
+      <button class="btn" id="fsActBtn">&#128203; Activity</button>
     </div>
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
       <span style="flex:1;font-size:13.5px;min-width:120px">Version: <b id="fsSetVer"></b></span>
@@ -4869,24 +4873,35 @@ async function meterStart(onTick) {
   if (meterCtx.state === "suspended") await meterCtx.resume();
   const src = meterCtx.createMediaStreamSource(meterStream);
   meterAnalyser = meterCtx.createAnalyser();
-  meterAnalyser.fftSize = 2048;
+  meterAnalyser.fftSize = 4096;
   src.connect(meterAnalyser);
   const buf = new Float32Array(meterAnalyser.fftSize);
   meterMinV = Infinity; meterMaxV = -Infinity; meterBegan = Date.now();
   meterOnTick = onTick;
+  /* v1.32 sensitivity pass (Reece 28 Jul): mic DC bias is now removed before the RMS
+     (it was drowning quiet sounds), polls run every 50 ms with SPL "Fast" 125 ms
+     exponential time-weighting (was independent 120 ms snapshots that missed short
+     sounds), window widened 2048->4096 samples so the polls overlap, and the display
+     floor dropped 20->10 dB. Still indicative only - the disclaimer stands. */
+  let meterMs = 0;                                  // smoothed mean-square (Fast, tau 125 ms)
+  const META = 1 - Math.exp(-0.05 / 0.125);         // alpha for 50 ms polls
   meterTimer2 = setInterval(() => {
     meterAnalyser.getFloatTimeDomainData(buf);
+    let mean = 0;
+    for (let i = 0; i < buf.length; i++) mean += buf[i];
+    mean /= buf.length;
     let sum = 0;
-    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-    const rms = Math.sqrt(sum / buf.length);
-    const db = rms > 0 ? Math.max(20, Math.min(130, 20 * Math.log10(rms) + 94 + calOffset)) : 20;
+    for (let i = 0; i < buf.length; i++) { const v = buf[i] - mean; sum += v * v; }
+    meterMs += (sum / buf.length - meterMs) * META;
+    const rms = Math.sqrt(meterMs);
+    const db = rms > 0 ? Math.max(10, Math.min(130, 20 * Math.log10(rms) + 94 + calOffset)) : 10;
     meterLastRaw = db - calOffset;
     if (Date.now() - meterBegan > 400) {
       meterMinV = Math.min(meterMinV, db);
       meterMaxV = Math.max(meterMaxV, db);
     }
     if (meterOnTick) meterOnTick(db, meterMinV, meterMaxV);
-  }, 120);
+  }, 50);
 }
 function meterStop() {
   if (meterTimer2) { clearInterval(meterTimer2); meterTimer2 = null; }
@@ -6872,6 +6887,7 @@ async function fsSaveAsFormat(asBundle) {
   try { who = localStorage.getItem("fs-user") || ""; } catch (e) {}
   fsRegister.updated = new Date().toISOString().slice(0, 10);
   if (who) fsRegister.savedBy = who;
+  fsActLog("Register saved", "file");
   const blob = await fsRegisterBlob(asBundle);
   const ext = asBundle ? ".fsbundle" : ".json";
   const how = await deliverFile(blob, "firespark-register-" + fsRegister.updated + ext,
@@ -7302,6 +7318,7 @@ async function fsMsSaveNow() {
     if (item) { fsMsProg("Archiving the previous version…"); await fsMsArchive(item); }
     fsRegister.updated = new Date().toISOString().slice(0, 10);
     if (who) fsRegister.savedBy = who;
+    fsActLog("Register saved", "OneDrive");
     fsMsProg("Packing…");
     const blob = await fsBuildBundle(fsRegister);
     fsMsProg("Uploading " + (blob.size / 1048576).toFixed(1) + " MB…");
@@ -9095,6 +9112,7 @@ function fsDefFormSave() {
     id: "d" + Date.now() + Math.random().toString(16).slice(2, 6),
     key: t ? "type:" + t.id : "",
     created: new Date().toISOString(),
+    raisedBy: fsWho() || "",
     source: "Raised on site",
     desc: (typeName + (loc ? " — " + loc : "") + (desc ? " — " + desc : "")),
     closed: null, quoteStatus: null,
@@ -9109,6 +9127,7 @@ function fsDefFormSave() {
   const node = fsDfNode || site;
   node.defects = node.defects || [];
   node.defects.push(d);
+  fsActLog("Defect raised", d.desc);
   fsMarkDirty();
   document.getElementById("fsDefectModal").classList.remove("show");
   if (typeof fsRenderSite === "function" && typeof fsSite !== "undefined" && fsSite) fsRenderSite();
@@ -9375,8 +9394,9 @@ function fsQuoteSetStatus(q, k) {
   if (d) {
     d.quoteStatus = map[k] || null;
     d.quoteAt = now;
-    d.quoteBy = fsPipeWho();
+    d.quoteBy = fsPipeWho() || fsWho() || "";
     if (q.number) d.quoteRef = q.number;
+    fsActLog("Quote " + k, d.desc);
   }
 }
 function fsQuoteDefect(q) {
@@ -9832,7 +9852,8 @@ function fsPipeRender() {
     const k = sel.value;
     r.d.quoteStatus = k || null;
     r.d.quoteAt = new Date().toISOString();
-    r.d.quoteBy = fsPipeWho();
+    r.d.quoteBy = fsPipeWho() || fsWho() || "";
+    fsActLog("Quote status: " + (k || "cleared"), r.d.desc);
     if (k === "quoted" || k === "approved") {
       const ref = prompt("Quote reference (optional) — your quote number from the accounting system:", r.d.quoteRef || "");
       if (ref !== null) r.d.quoteRef = String(ref).trim();
@@ -9929,7 +9950,7 @@ function fsStamp() {
   const ex = document.getElementById("fsExportReg");
   ex.style.display = fsRegister ? "inline-block" : "none";
   document.getElementById("fsPlannerBtn").style.display = (fsRegister && (typeof fsModOn !== "function" || fsModOn("planner"))) ? "inline-block" : "none";
-  document.getElementById("fsDashBtn").style.display = (fsRegister && (typeof fsModOn !== "function" || fsModOn("dashboard"))) ? "inline-block" : "none";
+  document.getElementById("fsDashBtn").style.display = (fsRegister && (typeof fsModOn !== "function" || fsModOn("dashboard")) && (typeof fsCan !== "function" || fsCan("money"))) ? "inline-block" : "none";
   /* This must never be labelled as saving THE register - it writes a LOCAL file and
      is not the central OneDrive copy. The old label flipped between two names. */
   ex.innerHTML = "&#128190; " + ((typeof fsRegFileHandle !== "undefined" && fsRegFileHandle) ? "Save to file" : "Download a copy");
@@ -10003,10 +10024,48 @@ function fsRenderClients() {
     row.style.cssText += ";padding:16px;margin-bottom:10px;cursor:pointer;display:flex;align-items:center;gap:12px";
     row.innerHTML = (fsFadeOn() ? '<span title="Closest test due across this client\'s sites" style="width:13px;height:13px;border-radius:50%;background:' + fsClientFadeCol(c) + ';flex:0 0 auto"></span>' : '') +
       '<div style="flex:1"><div style="font-size:16.5px;font-weight:700">' + fsEsc(c.name) +
-      '</div><div style="font-size:12.5px;color:var(--fs-sub2)">' + (c.sites || []).length + ' sites</div></div><div style="color:var(--fs-faint)">&#9654;</div>';
+      '</div><div style="font-size:12.5px;color:var(--fs-sub2)">' + (c.sites || []).length + ' sites</div></div>' +
+      (fsWhoRole() !== "tech" ? '<a class="fsCliRen" title="Rename client" style="color:var(--fs-sub2);cursor:pointer;font-size:14px;padding:6px 7px">&#9998;</a>' +
+        '<a class="fsCliDel" title="Delete client" style="color:var(--fs-sub2);cursor:pointer;font-size:14px;padding:6px 7px">&#128465;</a>' : '') +
+      '<div style="color:var(--fs-faint)">&#9654;</div>';
     row.onclick = () => { fsClient = c; fsRenderSites(); fsShow("fsSitesView"); };
+    const ren = row.querySelector(".fsCliRen");
+    if (ren) ren.onclick = ev => { ev.stopPropagation(); fsClientRename(c); };
+    const del = row.querySelector(".fsCliDel");
+    if (del) del.onclick = ev => { ev.stopPropagation(); fsClientDelete(c); };
     wrap.appendChild(row);
   });
+}
+/* v1.32: client rename + delete (Reece 28 Jul - a misspelt client name was stuck).
+   Rename edits the display name only: every screen derives it live from c.name, and
+   quotes deliberately keep the client/site names captured at creation (existing rule).
+   Delete is guarded twice (counts + type-the-name) and takes a device backup snapshot
+   first - never silent data loss. Hidden from the tech role; site-level device history
+   uses the per-site recycle bin as before. */
+function fsClientRename(c) {
+  const nm = prompt("Rename client:", c.name);
+  if (!nm || !nm.trim() || nm.trim() === c.name) return;
+  const t = nm.trim();
+  if ((fsRegister.clients || []).some(x => x !== c && String(x.name).trim().toLowerCase() === t.toLowerCase()) &&
+      !confirm('Another client is already called "' + t + '". Rename anyway?')) return;
+  c.name = t;
+  fsMarkDirty();
+  fsRenderClients();
+}
+async function fsClientDelete(c) {
+  const sites = c.sites || [];
+  const blds = sites.reduce((n, s) => n + ((s.buildings || []).length), 0);
+  const msg = 'Delete client "' + c.name + '"?\n\nThis removes:\n• ' + sites.length + ' site' + (sites.length === 1 ? '' : 's') +
+    (blds ? '\n• ' + blds + ' building' + (blds === 1 ? '' : 's') : '') +
+    '\n• all equipment, test history, defects and floor plans inside them\n\nA backup snapshot is kept on this device first (Backups button), and register files already saved on disk or OneDrive are untouched.';
+  if (!confirm(msg)) return;
+  const typed = prompt('Type the client name to confirm the delete:');
+  if (typed == null) return;
+  if (typed.trim() !== String(c.name).trim()) { alert("Name doesn't match — nothing was deleted."); return; }
+  await fsBackupSnapshot("before deleting client " + c.name);
+  fsRegister.clients = (fsRegister.clients || []).filter(x => x !== c);
+  fsMarkDirty();
+  fsRenderClients();
 }
 function fsRenderSites() {
   document.getElementById("fsClientTitle").textContent = fsClient.name;
@@ -10296,7 +10355,7 @@ function fsRenderTab() {
     html += '<div class="fscard" style="padding:20px">';
     html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">' +
       '<h3 style="font-size:16px;font-weight:700;flex:1;min-width:120px">Defects <span style="color:' + (open.length ? '#c62828' : 'var(--fs-sub2)') + ';font-size:13px">(' + open.length + ' open)</span></h3>' +
-      '<button class="fsbtnP" id="fsDefAddBtn">&#65291; Raise defect</button></div>';
+      (fsCan("field") ? '<button class="fsbtnP" id="fsDefAddBtn">&#65291; Raise defect</button>' : '') + '</div>';
     if (!defs.length) html += '<div style="color:var(--fs-faint);font-size:13.5px">No defects recorded. Failed checklist items and failed devices from tests carry forward here until rectified, and you can log one yourself with &#65291; Raise defect.</div>';
     open.forEach(d => {
       const dys = fsDefDays(d), bk = fsDefBucket(dys), qs = fsQs(d);
@@ -10305,7 +10364,7 @@ function fsRenderTab() {
         (d.photos && d.photos.length ? '<div style="flex:none"><img class="fsDefPh" data-id="' + fsEsc(d.id) + '" src="' + d.photos[0] + '" style="width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid var(--fs-border);cursor:pointer;display:block">' +
           (d.photos.length > 1 ? '<div style="font-size:10px;color:var(--fs-sub2);text-align:center;margin-top:2px">' + d.photos.length + ' photos</div>' : '') + '</div>' : '') +
         '<div style="flex:1"><div style="font-size:14px;font-weight:600">' + fsEsc(d.desc) + '</div>' +
-        '<div style="font-size:12px;color:var(--fs-sub2)">' + fsEsc((d.created || "").slice(0, 10)) + ' &middot; ' + fsEsc(d.source || "") + (d.lastSeen ? ' &middot; <span style="color:#c62828">still failing ' + fsEsc(d.lastSeen) + '</span>' : '') + '</div>' +
+        '<div style="font-size:12px;color:var(--fs-sub2)">' + fsEsc((d.created || "").slice(0, 10)) + ' &middot; ' + fsEsc(d.source || "") + (d.raisedBy ? ' &middot; ' + fsEsc(d.raisedBy) : '') + (d.lastSeen ? ' &middot; <span style="color:#c62828">still failing ' + fsEsc(d.lastSeen) + '</span>' : '') + '</div>' +
         (d.action ? '<div style="font-size:12px;color:var(--fs-sub);margin-top:3px">Action: ' + fsEsc(d.action) + '</div>' : '') +
         '<div style="margin-top:5px;display:flex;gap:7px;flex-wrap:wrap;align-items:center">' +
           (dc ? '<span style="font-size:11px;font-weight:800;color:#fff;background:' + dc.col + ';border-radius:11px;padding:1px 9px">' + fsEsc(dc.short) + '</span>'
@@ -10321,16 +10380,16 @@ function fsRenderTab() {
           '</div>' : '') +
         (d.qid ? '<div style="margin-top:5px"><a class="fsDefWs" data-id="' + fsEsc(d.id) + '" style="color:var(--fs-accent);cursor:pointer;font-size:12px;font-weight:700">&#128205; Show me this on the plan</a></div>' : '') +
         '</div>' +
-        '<div style="display:flex;flex-direction:column;gap:4px;flex:none">' +
+        (fsCan("field") ? '<div style="display:flex;flex-direction:column;gap:4px;flex:none">' +
         '<button class="fsbtn fsDefFix" data-id="' + fsEsc(d.id) + '" style="color:#1b8a3f;font-weight:700">&#10003; Rectified</button>' +
         '<button class="fsbtn fsDefPhAdd" data-id="' + fsEsc(d.id) + '" style="font-size:11.5px;padding:3px 8px">&#128247; Photo</button>' +
         '<button class="fsbtn fsDefDel" data-id="' + fsEsc(d.id) + '" style="font-size:11.5px;padding:3px 8px;color:#c62828">Delete</button>' +
-        '</div></div>';
+        '</div>' : '') + '</div>';
     });
     if (closed.length) {
       html += '<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--fs-sub);font-size:13.5px">' + closed.length + ' rectified</summary>';
       closed.forEach(d => {
-        html += '<div style="border-top:1px solid var(--fs-border);padding:8px 0;font-size:13px;color:var(--fs-sub);display:flex;gap:10px;align-items:center"><div style="flex:1"><s>' + fsEsc(d.desc) + '</s><div style="font-size:12px;color:var(--fs-faint)">rectified ' + fsEsc((d.closed || "").slice(0, 10)) + (d.reopened ? ' &middot; was reopened ' + fsEsc((d.reopened || "").slice(0, 10)) : '') + '</div></div><button class="fsbtn fsDefReopen" data-id="' + fsEsc(d.id) + '" style="padding:2px 10px">&#8617; Reopen</button></div>';
+        html += '<div style="border-top:1px solid var(--fs-border);padding:8px 0;font-size:13px;color:var(--fs-sub);display:flex;gap:10px;align-items:center"><div style="flex:1"><s>' + fsEsc(d.desc) + '</s><div style="font-size:12px;color:var(--fs-faint)">rectified ' + fsEsc((d.closed || "").slice(0, 10)) + (d.closedBy ? ' by ' + fsEsc(d.closedBy) : '') + (d.reopened ? ' &middot; was reopened ' + fsEsc((d.reopened || "").slice(0, 10)) : '') + '</div></div>' + (fsCan("field") ? '<button class="fsbtn fsDefReopen" data-id="' + fsEsc(d.id) + '" style="padding:2px 10px">&#8617; Reopen</button>' : '') + '</div>';
       });
       html += '</details>';
     }
@@ -10580,6 +10639,8 @@ function fsRenderTab() {
       if (!d) return;
       if (!confirm("Mark as rectified?\n\n" + d.desc)) return;
       d.closed = new Date().toISOString();
+      d.closedBy = fsWho() || "";
+      fsActLog("Defect rectified", d.desc);
       fsMarkDirty();
       fsRenderSite();
     });
@@ -10589,6 +10650,8 @@ function fsRenderTab() {
       if (!confirm("Reopen this defect? (undoes an accidental Rectified tap)\n\n" + d.desc)) return;
       d.closed = null;
       d.reopened = new Date().toISOString();
+      d.reopenedBy = fsWho() || "";
+      fsActLog("Defect reopened", d.desc);
       fsMarkDirty();
       fsRenderSite();
     });
@@ -11523,6 +11586,7 @@ document.getElementById("fsExportReg").onclick = async () => {
   }
   fsRegister.updated = new Date().toISOString().slice(0, 10);
   fsRegister.savedBy = who;
+  fsActLog("Register saved", "file");
   const asBundle = fsSaveIsBundle();
   const payload = await fsRegisterBlob(asBundle);
   if (fsRegFileHandle) {
@@ -11722,6 +11786,7 @@ function fsRestoreSession() {
 function fsTestBtnRefresh() {
   const b = document.getElementById("fsTestBtn");
   if (!b) return;
+  b.style.display = (typeof fsCan !== "function" || fsCan("field")) ? "" : "none";
   if (fsSession && fsChecklists) {
     const m = fsChecklists.modes[fsSession.mode];
     b.innerHTML = "&#9679; " + ((m && m.label) || fsSession.mode) + " test&hellip;";
@@ -12038,6 +12103,7 @@ function fsFinishTest() {
   const site = fsSite;
   site.history = site.history || [];
   site.history.unshift(rec);
+  fsActLog(def.label + " test recorded", site.name || "");
   site.defects = site.defects || [];
   const mkid = () => "d" + Date.now() + Math.random().toString(16).slice(2, 6);
   const openDefs = site.defects.filter(d => !d.closed);
@@ -12045,7 +12111,7 @@ function fsFinishTest() {
   const addDef = (key, desc) => {
     const ex = openDefs.find(d => (d.key && d.key === key) || (!d.key && d.desc === desc));
     if (ex) { ex.lastSeen = rec.finished.slice(0, 10); ex.seen = (ex.seen || 1) + 1; dedup++; return; }
-    site.defects.push({ id: mkid(), key: key, created: rec.finished, source: def.label + " test", desc: desc, closed: null, quoteStatus: null });
+    site.defects.push({ id: mkid(), key: key, created: rec.finished, raisedBy: rec.tech || fsWho() || "", source: def.label + " test", desc: desc, closed: null, quoteStatus: null });
   };
   fails.forEach(x => addDef("ck:" + x.k, "Checklist " + x.k + " failed: " + x.t + (x.note ? " — " + x.note : "")));
   failedDev.forEach(d => addDef("dev:" + d.level + ":" + d.type + ":" + (d.zone || "") + ":" + (d.loop || "") + ":" + (d.dev || ""),
@@ -12443,9 +12509,32 @@ document.getElementById("fsSettingsBtn").onclick = () => {
 };
 document.getElementById("fsSetClose").onclick = () => document.getElementById("fsSettingsModal").classList.remove("show");
 document.getElementById("fsMapsApp").onchange = e => { try { localStorage.setItem("fs-mapsapp", e.target.value); } catch (er) {} };
-document.getElementById("fsSetName").addEventListener("change", e => {
-  try { localStorage.setItem("fs-user", e.target.value.trim()); } catch (er) {}
+document.getElementById("fsSetName").addEventListener("change", async e => {
+  const name = e.target.value.trim();
+  /* switching to a listed user with a password asks for it — same rule as the picker */
+  const match = (typeof fsUsers === "function" ? fsUsers() : []).find(u => u.status === "active" && u.name.toLowerCase() === name.toLowerCase());
+  if (match && match.passHash && !(await fsWhoAuth(match))) { e.target.value = fsWho(); return; }
+  fsWhoSet(match ? match.name : name);
 });
+/* v1.30: who-did-what viewer — reads the activity trail stored inside the register */
+document.getElementById("fsActBtn").onclick = () => {
+  if (!fsRegister) { alert("Open a register first."); return; }
+  const list = fsRegister.activity || [];
+  if (!list.length) { alert("Nothing recorded yet.\n\nFrom v1.30, saves, tests, defects and quote updates are logged here with the name each tech picked on their device."); return; }
+  const d = document.createElement("div");
+  d.className = "modal show"; d.style.zIndex = "125";
+  let h = '<div class="modalbox" style="max-width:520px;width:94vw;max-height:80vh;overflow-y:auto;text-align:left"><h3 style="margin-bottom:4px">&#128203; Recent activity</h3>';
+  h += '<div style="font-size:11.5px;color:#999;margin-bottom:10px">Last ' + list.length + ' recorded action' + (list.length > 1 ? 's' : '') + ' &mdash; kept inside the register file, so every device sees the same trail. Names are what each user picked on their device: traceability, not a security log.</div>';
+  list.forEach(a => {
+    h += '<div style="border-bottom:1px solid #333a41;padding:7px 0;font-size:13px"><b>' + fsEsc(a.who || "Unknown") + '</b> &middot; ' + fsEsc(a.act || "") +
+         (a.what ? ' <span style="color:#93a4ab">&mdash; ' + fsEsc(a.what) + '</span>' : '') +
+         '<div style="font-size:11px;color:#888">' + fsEsc((a.t || "").slice(0, 16).replace("T", " ")) + '</div></div>';
+  });
+  h += '<div class="row" style="margin-top:12px"><button class="btn" id="fsActCX">Close</button></div></div>';
+  d.innerHTML = h;
+  document.body.appendChild(d);
+  d.querySelector("#fsActCX").onclick = () => d.remove();
+};
 document.getElementById("fsSetUpd").onclick = async () => {
   const btn = document.getElementById("fsSetUpd");
   if (!("serviceWorker" in navigator) || location.protocol !== "https:") { alert("Update checks only apply to the installed/online app."); return; }
@@ -13194,6 +13283,9 @@ function fsPlSites() {  // top-level sites only (buildings share the site addres
   return out;
 }
 function fsPlById(id) { let f = null; fsPlSites().forEach(e => { if (e.s.id === id) f = e; }); return f; }
+/* v1.32: ad-hoc jobs ({adhoc:true, title, start, mins, done}) sit in the plan alongside
+   site stops - one display-name seam for every render/export. */
+function fsPlStopName(x, e) { return x && x.adhoc ? (x.title || "Job") : (e ? e.s.name : (x ? x.siteId : "?")); }
 function fsPlT2M(t) { const m = /^(\d{1,2}):(\d{2})/.exec(t || ""); return m ? (+m[1]) * 60 + (+m[2]) : null; }
 function fsPlM2T(m) { return String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0"); }
 function fsPlHavMin(a, b) {  // fallback: haversine km x 1.35 road factor at 65 km/h
@@ -13353,6 +13445,19 @@ function fsPlOrderDay(stops, st, startM, endM, buf) {
   return timed.map(t2 => ({ siteId: t2.en.x.siteId, start: fsPlM2T(t2.sM), mins: t2.en.x.mins, done: t2.en.x.done }));
 }
 
+/* v1.32: ad-hoc jobs are reserved blocks on their day - a planned visit may not
+   overlap one. Pushes a start past every overlapping block (lunch re-checked after
+   each push); the caller still checks the day-end fit afterwards. */
+function fsPlAvoidBlocks(sM, mins, lu, blocks) {
+  for (let guard = 0; guard < 20; guard++) {
+    let moved = false;
+    for (const b of blocks) {
+      if (sM < b.end && fsPlLunchEnd(sM, mins, lu) > b.at) { sM = fsPlLunchStart(b.end, lu); moved = true; }
+    }
+    if (!moved) break;
+  }
+  return sM;
+}
 function fsPlAutoPlan(selIds, fromDk, toDk) {  // deterministic greedy day-fill; locked days untouched
   const st = fsPlLoadSettings();
   const mo = fsPlMonthObj();
@@ -13387,11 +13492,14 @@ function fsPlAutoPlan(selIds, fromDk, toDk) {  // deterministic greedy day-fill;
   let carry = null;   // multi-day visit continuing into the next work day(s)
   workDates.forEach(dk => {
     if (mo.locked[dk]) return;
-    mo.days[dk] = [];
+    const adhocKeep = (mo.days[dk] || []).filter(x => x.adhoc);   // v1.32: manual ad-hoc jobs survive a re-plan
+    mo.days[dk] = adhocKeep.slice();
+    const blocks = adhocKeep.map(x => { const a = fsPlT2M(x.start) || 0; return { at: a, end: a + (+x.mins || 0) }; }).sort((a, b) => a.at - b.at);
+    const blockMins = blocks.reduce((s2, b) => s2 + (b.end - b.at), 0);
     let cur = st.baseGeo ? { geo: st.baseGeo, id: "_base" } : null;
     let t = startM;
     if (carry) {
-      const chunk = Math.min(carry.remain, Math.max(30, endM - startM - (lu ? lu.mins : 0)));   // lunch eats into a carry day
+      const chunk = Math.min(carry.remain, Math.max(30, endM - startM - (lu ? lu.mins : 0) - blockMins));   // lunch + ad-hoc jobs eat into a carry day
       mo.days[dk].push({ siteId: carry.e.s.id, start: fsPlM2T(startM), mins: chunk, done: false });
       t = fsPlLunchEnd(startM, chunk, lu) + buf;
       cur = { geo: carry.e.s.geo, id: carry.e.s.id };
@@ -13415,6 +13523,7 @@ function fsPlAutoPlan(selIds, fromDk, toDk) {  // deterministic greedy day-fill;
           sM = prefM;                                            // a preferred time is a hard constraint - it wins over the lunch window
         } else {
           sM = fsPlLunchStart(Math.max(arrive, startM), lu);     // never START a visit inside the lunch window
+          if (blocks.length) sM = fsPlAvoidBlocks(sM, mins, lu, blocks);   // v1.32: never overlap an ad-hoc job
           if (fsPlLunchEnd(sM, mins, lu) > endM && !dayEmpty) return;   // long visits may start on an empty day and carry over
         }
         const wait = prefM != null ? Math.max(0, prefM - arrive) : 0;
@@ -13544,17 +13653,17 @@ function fsPlIcs(dates, fname) {
   const L = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//FireSpark//Planner//EN"];
   let n = 0;
   dates.forEach(dk => (mo.days[dk] || []).forEach((x, i) => {
-    const e = fsPlById(x.siteId);
-    if (!e) return;
+    const e = x.adhoc ? null : fsPlById(x.siteId);
+    if (!e && !x.adhoc) return;
     n++;
     const endT = fsPlM2T(fsPlT2M(x.start) + x.mins);
     L.push("BEGIN:VEVENT",
-      "UID:" + dk + "-" + i + "-" + x.siteId + "@firespark",
+      "UID:" + dk + "-" + i + "-" + (x.adhoc ? "adhoc" : x.siteId) + "@firespark",
       "DTSTART:" + dk.replace(/-/g, "") + "T" + x.start.replace(":", "") + "00",
       "DTEND:" + dk.replace(/-/g, "") + "T" + endT.replace(":", "") + "00",
-      "SUMMARY:" + fsPlIcsEsc(e.s.name + " - routine test"),
-      "LOCATION:" + fsPlIcsEsc(e.s.address || ""),
-      "DESCRIPTION:" + fsPlIcsEsc("Client: " + e.c.name + " (FireSpark planner)"),
+      "SUMMARY:" + fsPlIcsEsc(x.adhoc ? (x.title || "Job") : (e.s.name + " - routine test")),
+      "LOCATION:" + fsPlIcsEsc(e ? (e.s.address || "") : ""),
+      "DESCRIPTION:" + fsPlIcsEsc(x.adhoc ? "Ad-hoc job (FireSpark planner)" : ("Client: " + e.c.name + " (FireSpark planner)")),
       "END:VEVENT");
   }));
   L.push("END:VCALENDAR");
@@ -13578,7 +13687,7 @@ function fsPlPdf() {
       if (!luDone && !spans && sM2 >= luP.at) { lines.push(["t", "  " + fsPlM2T(luP.at) + "  Lunch break  (" + luP.mins + " min)"]); luDone = true; }
       if (spans) luDone = true;
       const e = fsPlById(x.siteId);
-      lines.push(["t", "  " + x.start + "  " + (e ? e.s.name : x.siteId) + "  (" + x.mins + " min)" + (spans ? "  · incl. " + luP.mins + " min lunch" : "") + (e ? "  · " + e.c.name : "")]);
+      lines.push(["t", "  " + x.start + "  " + fsPlStopName(x, e) + "  (" + x.mins + " min)" + (spans ? "  · incl. " + luP.mins + " min lunch" : "") + (e ? "  · " + e.c.name : (x.adhoc ? "  · ad-hoc job" : ""))]);
     });
   });
   (mo.tray || []).forEach(x => {
@@ -13624,7 +13733,7 @@ function fsPlGridWeeks() {   // Sunday-first week rows incl. grey spill days eit
 function fsPlGridStops(dk) {
   const days = ((fsPlPlans[dk.slice(0, 7)] || {}).days) || {};
   return (days[dk] || []).slice().sort((a, b) => a.start.localeCompare(b.start))
-    .map(x => { const e = fsPlById(x.siteId); return { t: x.start.replace(/^0/, ""), n: e ? e.s.name : x.siteId }; });
+    .map(x => { const e = fsPlById(x.siteId); return { t: x.start.replace(/^0/, ""), n: fsPlStopName(x, e) }; });
 }
 function fsPlGridPdf() {
   if (!Object.keys(fsPlMonthObj().days).length) { alert("Nothing planned yet."); return; }
@@ -13801,6 +13910,13 @@ function fsPlRender() {
     '<button class="fsbtn" id="fsPlExpBtn" title="Calendar &amp; run sheet exports">&#128228; Export</button></div>';
   html += '<div style="font-size:11.5px;color:var(--fs-faint);margin-bottom:10px">' + tvNote + '</div>';
 
+  if (fsPlMoveStop) {   // v1.32 tap-to-move: pick the stop in the day view, tap the target day here
+    const mvE = fsPlMoveStop.stop.adhoc ? null : fsPlById(fsPlMoveStop.stop.siteId);
+    html += '<div style="background:rgba(14,124,140,.12);border:1px solid var(--fs-accent);border-radius:9px;padding:9px 12px;font-size:13px;margin-bottom:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+      '<span style="flex:1;min-width:180px"><b>Moving:</b> ' + fsEsc(fsPlMoveStop.stop.start) + ' ' + fsEsc(fsPlStopName(fsPlMoveStop.stop, mvE)) + ' &mdash; tap the day to move it to (&#8249; &#8250; changes month)</span>' +
+      '<button class="fsbtn" id="fsPlMoveX" style="padding:6px 12px">Cancel</button></div>';
+  }
+
   if (fsPlShowSettings) {
     const dows = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     html += '<div class="fscard" style="padding:16px;margin-bottom:12px">' +
@@ -13842,8 +13958,8 @@ function fsPlRender() {
       stops.forEach(x => {
         const e = fsPlById(x.siteId);
         const outside = fsPlT2M(x.start) != null && fsPlT2M(x.start) < startM;   // amber = starts before set hours
-        const col = outside ? "#b45f00" : FSPL_COLS[(e ? e.ci : 0) % FSPL_COLS.length];
-        cell += '<div style="background:' + col + ';color:#fff;border-radius:5px;font-size:10px;font-weight:700;padding:1px 4px;margin:1px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"' + (outside ? ' title="Starts before your set day start"' : '') + '>' + fsEsc(x.start) + ' ' + fsEsc(e ? e.s.name : "?") + '</div>';
+        const col = outside ? "#b45f00" : (x.adhoc ? "#5a6570" : FSPL_COLS[(e ? e.ci : 0) % FSPL_COLS.length]);
+        cell += '<div style="background:' + col + ';color:#fff;border-radius:5px;font-size:10px;font-weight:700;padding:1px 4px;margin:1px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"' + (outside ? ' title="Starts before your set day start"' : (x.adhoc ? ' title="Ad-hoc job"' : '')) + '>' + fsEsc(x.start) + ' ' + fsEsc(x.adhoc ? (x.title || "Job") : (e ? e.s.name : "?")) + '</div>';
       });
       if (stops.length) {
         const lastEnd = Math.max.apply(null, stops.map(x => fsPlT2M(x.start) + x.mins));
@@ -13885,11 +14001,38 @@ function fsPlRender() {
     fsPlShowSettings = false;
     fsPlRender();
   };
-  document.querySelectorAll(".fsPlDay").forEach(td => td.onclick = () => { if (fsPlJustDragged) { fsPlJustDragged = false; return; } fsPlSelDay = td.dataset.dk === fsPlSelDay ? null : td.dataset.dk; fsPlRender(); });
+  const mvX = document.getElementById("fsPlMoveX");
+  if (mvX) mvX.onclick = () => { fsPlMoveStop = null; fsPlRender(); };
+  document.querySelectorAll(".fsPlDay").forEach(td => td.onclick = () => { if (fsPlJustDragged) { fsPlJustDragged = false; return; } if (fsPlMoveStop) { fsPlCommitMove(td.dataset.dk); return; } fsPlSelDay = td.dataset.dk === fsPlSelDay ? null : td.dataset.dk; fsPlRender(); });
   fsPlWireDayDrag();
   fsPlWireDay();
 }
 let fsPlJustDragged = false;
+/* v1.32 tap-to-move (replaces the type-a-date prompt): "move" on a stop arms this,
+   tapping any day cell commits. Destination day is locked - manual placement, a
+   re-plan keeps it (same rule as dragging a whole day). Survives ‹ › month nav. */
+let fsPlMoveStop = null;   // { mKey, dk, stop }
+function fsPlCommitMove(toDk) {
+  const mv = fsPlMoveStop;
+  fsPlMoveStop = null;
+  if (!mv || !toDk) { fsPlRender(); return; }
+  const src = fsPlPlans[mv.mKey];
+  const arr = (src && src.days && src.days[mv.dk]) || [];
+  const ix = arr.indexOf(mv.stop);
+  if (ix < 0) { fsPlRender(); return; }   // stop vanished (re-plan etc.) - nothing moved
+  if (toDk !== mv.dk) {
+    arr.splice(ix, 1);
+    if (!arr.length) delete src.days[mv.dk];
+    const mKey2 = toDk.slice(0, 7);
+    fsPlPlans[mKey2] = fsPlPlans[mKey2] || { days: {}, locked: {}, tray: [] };
+    (fsPlPlans[mKey2].days[toDk] = fsPlPlans[mKey2].days[toDk] || []).push(mv.stop);
+    fsPlPlans[mKey2].locked = fsPlPlans[mKey2].locked || {};
+    fsPlPlans[mKey2].locked[toDk] = true;
+    fsPlSavePlans();
+  }
+  fsPlSelDay = toDk.slice(0, 7) === fsPlMonth ? toDk : null;
+  fsPlRender();
+}
 function fsPlMoveDay(fromDk, toDk) {
   if (!fromDk || !toDk || fromDk === toDk) return;
   const mo = fsPlMonthObj();
@@ -13905,6 +14048,7 @@ function fsPlMoveDay(fromDk, toDk) {
   fsPlRender();
 }
 function fsPlWireDayDrag() {
+  if (fsPlMoveStop) return;   // move mode: day taps commit the move, no whole-day drag
   const mo = fsPlMonthObj();
   let ghost = null;
   const killGhost = () => { if (ghost) { ghost.remove(); ghost = null; } document.querySelectorAll(".fsPlDay.fsPlDrop").forEach(t => t.classList.remove("fsPlDrop")); };
@@ -13980,7 +14124,7 @@ function fsPlDayHtml(dk) {
       luShown = true;
     }
     if (luSpan) luShown = true;
-    if (prev) {
+    if (prev && !prev.adhoc && !x.adhoc) {   // no drive leg to/from an ad-hoc job - its location is free text
       const pe = fsPlById(prev.siteId);
       const trv = (pe && e) ? fsPlTravel(pe.s.geo, pe.s.id, e.s.geo, e.s.id) : null;
       html += '<div style="font-size:11.5px;color:var(--fs-faint);padding:2px 0 2px 14px">&#8595; ' + (trv ? (trv.est ? '~' : '') + trv.min + ' min drive' : 'drive time unknown') + '</div>';
@@ -13990,12 +14134,13 @@ function fsPlDayHtml(dk) {
     html += '<div style="border:1px solid var(--fs-border);border-radius:10px;padding:9px 12px;margin:3px 0;' + (x.done ? 'opacity:.55' : '') + '">' +
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
       '<input type="checkbox" class="fsPlDone" data-i="' + i + '"' + (x.done ? ' checked' : '') + ' title="Done" style="width:17px;height:17px;accent-color:#1b8a3f">' +
-      '<b style="font-size:14.5px;flex:1;min-width:120px">' + fsEsc(e ? e.s.name : x.siteId) + '</b>' +
-      '<button class="fsbtnP fsPlNavB" data-i="' + i + '" style="padding:6px 11px;font-size:12px">&#9654; Navigate</button></div>' +
+      '<b style="font-size:14.5px;flex:1;min-width:120px">' + fsEsc(fsPlStopName(x, e)) + '</b>' +
+      (x.adhoc ? '' : '<button class="fsbtnP fsPlNavB" data-i="' + i + '" style="padding:6px 11px;font-size:12px">&#9654; Navigate</button>') + '</div>' +
       '<div style="font-size:12px;color:var(--fs-sub);margin-top:3px">' +
       '<a class="fsPlTime" data-i="' + i + '" style="cursor:pointer;text-decoration:underline">' + fsEsc(x.start) + '</a>' +
-      ' &rarr; ' + endT + ' (' + fsPlFmtMins(x.mins) + ')' + luNote + (e && e.s.visit && e.s.visit.pref ? ' · pref ' + fsEsc(e.s.visit.pref) : '') + (e ? ' · ' + fsEsc(e.c.name) : '') +
+      ' &rarr; ' + endT + ' (' + fsPlFmtMins(x.mins) + ')' + luNote + (e && e.s.visit && e.s.visit.pref ? ' · pref ' + fsEsc(e.s.visit.pref) : '') + (e ? ' · ' + fsEsc(e.c.name) : (x.adhoc ? ' · ad-hoc job' : '')) +
       ((fsPlT2M(x.start) != null && fsPlT2M(x.start) < (fsPlT2M(fsPlLoadSettings().dayStart) || 420)) ? ' · <span style="color:#b45f00;font-weight:700">outside set hours</span>' : '') +
+      (x.adhoc ? ' · <a class="fsPlAdhRen" data-i="' + i + '" style="cursor:pointer;text-decoration:underline">rename</a>' : '') +
       ' · <a class="fsPlMove" data-i="' + i + '" style="cursor:pointer;text-decoration:underline">move</a>' +
       ' · <a class="fsPlDel" data-i="' + i + '" style="cursor:pointer;color:#c62828;text-decoration:underline">remove</a></div></div>';
     prev = x;
@@ -14004,7 +14149,12 @@ function fsPlDayHtml(dk) {
     '<select id="fsPlAddSel" class="fsinput" style="flex:2;min-width:160px;padding:9px">' +
     fsPlSites().map(e => '<option value="' + fsEsc(e.s.id) + '">' + fsEsc(e.s.name) + ' (' + fsEsc(e.c.name) + ')</option>').join("") + '</select>' +
     '<input id="fsPlAddT" class="fsinput" type="time" style="width:110px">' +
-    '<button class="fsbtn" id="fsPlAddGo">&#65291; Add stop</button></div></div>';
+    '<button class="fsbtn" id="fsPlAddGo">&#65291; Add stop</button></div>' +
+    '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center">' +
+    '<input id="fsPlAdhTtlIn" class="fsinput" placeholder="Ad-hoc job - free text, not a client site" style="flex:2;min-width:160px;padding:9px">' +
+    '<input id="fsPlAdhTime" class="fsinput" type="time" style="width:110px">' +
+    '<input id="fsPlAdhMins" class="fsinput" type="number" min="5" step="5" value="60" title="Minutes on the job" style="width:80px">' +
+    '<button class="fsbtn" id="fsPlAdhGo">&#65291; Add job</button></div></div>';
   return html;
 }
 function fsPlWireDay() {
@@ -14028,23 +14178,23 @@ function fsPlWireDay() {
   document.querySelectorAll(".fsPlMove").forEach(a => a.onclick = () => {
     const x = sorted()[+a.dataset.i];
     if (!x) return;
-    const t = prompt("Move to date (YYYY-MM-DD):", dk);
-    if (!t || !/^\d{4}-\d{2}-\d{2}$/.test(t.trim())) return;
-    const nk = t.trim();
-    mo.days[dk] = stops().filter(s2 => s2 !== x);
-    if (!mo.days[dk].length) delete mo.days[dk];
-    if (nk.slice(0, 7) === fsPlMonth) { (mo.days[nk] = mo.days[nk] || []).push(x); }
-    else {
-      fsPlPlans[nk.slice(0, 7)] = fsPlPlans[nk.slice(0, 7)] || { days: {}, locked: {}, tray: [] };
-      (fsPlPlans[nk.slice(0, 7)].days[nk] = fsPlPlans[nk.slice(0, 7)].days[nk] || []).push(x);
-    }
+    fsPlMoveStop = { mKey: fsPlMonth, dk: dk, stop: x };   // v1.32: arm tap-to-move, grid commits
+    fsPlSelDay = null;
+    fsPlRender();
+  });
+  document.querySelectorAll(".fsPlAdhRen").forEach(a => a.onclick = () => {
+    const x = sorted()[+a.dataset.i];
+    if (!x || !x.adhoc) return;
+    const t = prompt("Job name:", x.title || "");
+    if (!t || !t.trim()) return;
+    x.title = t.trim();
     fsPlSavePlans(); fsPlRender();
   });
   document.querySelectorAll(".fsPlDel").forEach(a => a.onclick = () => {
     const x = sorted()[+a.dataset.i];
     if (!x) return;
     const e = fsPlById(x.siteId);
-    if (!confirm("Remove " + (e ? e.s.name : "this stop") + " from this day?")) return;
+    if (!confirm("Remove " + (x.adhoc ? '"' + (x.title || "Job") + '"' : (e ? e.s.name : "this stop")) + " from this day?")) return;
     mo.days[dk] = stops().filter(s2 => s2 !== x);
     if (!mo.days[dk].length) delete mo.days[dk];
     fsPlSavePlans(); fsPlRender();
@@ -14061,6 +14211,19 @@ function fsPlWireDay() {
     }
     stops().push({ siteId: id, start: t, mins: fsPlMinsFor(e.s, fsPlMonth), done: false });
     mo.tray = (mo.tray || []).filter(x => x.siteId !== id);
+    fsPlSavePlans(); fsPlRender();
+  };
+  const adhGo = document.getElementById("fsPlAdhGo");   // v1.32: manual ad-hoc job, free text
+  if (adhGo) adhGo.onclick = () => {
+    const ttl = (document.getElementById("fsPlAdhTtlIn").value || "").trim();
+    if (!ttl) { alert("Give the job a name first."); return; }
+    let t = document.getElementById("fsPlAdhTime").value;
+    if (!t) {
+      const last = sorted().slice(-1)[0];
+      t = last ? fsPlM2T(fsPlT2M(last.start) + last.mins + (+fsPlLoadSettings().buffer || 0) + 20) : fsPlLoadSettings().dayStart;
+    }
+    const mins = Math.max(5, +document.getElementById("fsPlAdhMins").value || 60);
+    stops().push({ adhoc: true, title: ttl, start: t, mins: mins, done: false });
     fsPlSavePlans(); fsPlRender();
   };
 }
@@ -15080,7 +15243,183 @@ function fsCkEditRender() {
 
 /* ---------- access gate (client-side trial gate — NOT licensing; bypassable by design) ---------- */
 function fsAccess() { return (fsProfile && fsProfile.access && typeof fsProfile.access === "object" && fsProfile.access.mode) ? fsProfile.access : null; }
-function fsGateRemove() { const g = document.getElementById("fsGate"); if (g) g.remove(); }
+function fsGateRemove() { const g = document.getElementById("fsGate"); if (g) g.remove(); try { setTimeout(fsWhoCheck, 0); } catch (e) {} }
+
+/* ---------- v1.31 user identity + roles: traceability + SOFT enforcement, not security ----------
+   The profile carries users[] — { name, role: "admin"|"office"|"tech", passHash, status } —
+   deliberately 1:1 with BACKEND-DESIGN.md §3 memberships (role keys owner|admin|tech|office;
+   "owner" is assigned at backend import, never stored in a file). Roles hide/disable UI:
+   admin = everything incl. managing users · office = dashboard/quotes/pricebook · tech = field
+   work (tests, defects). The optional per-user password stops casual name-borrowing on shared
+   devices — it is convenience gating, NOT security: the file is readable by anyone who has it.
+   Real logins and a tamper-proof trail are the backend's job. fsWho()/fsWhoRole() are the seam
+   that swaps to authenticated users with zero rework. No user list = app behaves as before. */
+function fsWho() { try { return (localStorage.getItem("fs-user") || "").trim(); } catch (e) { return ""; } }
+function fsUsers() {
+  const p = (typeof fsProfile !== "undefined" && fsProfile) || null;
+  let u = p && Array.isArray(p.users) ? p.users : null;
+  if (!u && p && Array.isArray(p.techs)) u = p.techs.map(n => ({ name: n, role: "tech" }));   /* pre-v1.31 files */
+  return (u || []).map(x => ({
+    name: String((x && x.name) || (typeof x === "string" ? x : "")).trim(),
+    role: (x && /^(admin|office|tech)$/.test(x.role)) ? x.role : "tech",
+    passHash: (x && x.passHash) || "",
+    status: (x && x.status) === "disabled" ? "disabled" : "active"
+  })).filter(x => x.name);
+}
+function fsWhoUser() { const n = fsWho().toLowerCase(); return n ? (fsUsers().find(u => u.name.toLowerCase() === n) || null) : null; }
+function fsWhoRole() {
+  const us = fsUsers();
+  if (!us.length) return "admin";                    /* no user list — the app behaves exactly as before */
+  const u = fsWhoUser();
+  if (!u || u.status !== "active") return "tech";    /* unlisted or disabled name — field work only */
+  return u.role;
+}
+const FS_ROLE_CAPS = { admin: { admin: 1, money: 1, field: 1 }, office: { money: 1 }, tech: { field: 1 } };
+const FS_ROLE_LABEL = { admin: "Admin", office: "Office", tech: "Technician" };
+function fsCan(cap) { return !!(FS_ROLE_CAPS[fsWhoRole()] || {})[cap]; }
+function fsRoleRefresh() {
+  try { fsStamp(); } catch (e) {}
+  try { fsTestBtnRefresh(); } catch (e) {}
+  try { if (typeof fsSite !== "undefined" && fsSite && typeof fsRenderSite === "function") fsRenderSite(); } catch (e) {}
+}
+/* per-user password — convenience gate, honesty-flagged. Blank hash = no prompt. */
+async function fsWhoAuth(u) {
+  if (!u || !u.passHash) return true;
+  const p = prompt("Password for " + u.name + ":");
+  if (p === null) return false;
+  if (await fsSha256(p) !== u.passHash) { alert("Wrong password."); return false; }
+  return true;
+}
+function fsWhoSet(name) {
+  try { localStorage.setItem("fs-user", name); } catch (e) {}
+  try { const n = document.getElementById("fsSetName"); if (n) n.value = name; } catch (e) {}
+  fsRoleRefresh();
+}
+function fsActLog(act, what) {
+  try {
+    if (!fsRegister) return;
+    fsRegister.activity = fsRegister.activity || [];
+    fsRegister.activity.unshift({ t: new Date().toISOString(), who: fsWho() || (typeof fsMsWho !== "undefined" && fsMsWho) || "", act: act, what: String(what || "").slice(0, 140) });
+    if (fsRegister.activity.length > 300) fsRegister.activity.length = 300;
+  } catch (e) {}
+}
+function fsWhoCheck() {
+  try {
+    if (document.getElementById("fsGate")) return;     /* gate first — the picker appears after unlock */
+    if (document.getElementById("fsWhoPick")) return;
+    const users = fsUsers().filter(u => u.status === "active");
+    if (!users.length || fsWho()) return;
+    const g = document.createElement("div");
+    g.id = "fsWhoPick";
+    g.style.cssText = "position:fixed;inset:0;z-index:150;background:rgba(10,14,18,.96);display:flex;align-items:center;justify-content:center;padding:20px";
+    let inner = '<div style="max-width:420px;width:100%;background:#20252b;border:1px solid #3a444d;border-radius:14px;padding:24px;text-align:left">';
+    inner += '<h2 style="font-size:20px;margin-bottom:6px">Who is using this device?</h2>';
+    inner += '<div style="font-size:12.5px;color:#93a4ab;margin-bottom:14px">Saves, tests and defects are stamped with this name so the office can see who did what. Change it any time in &#9881; Settings.</div>';
+    users.forEach((u, i) => {
+      inner += '<button class="btn fsWhoBtn" data-i="' + i + '" style="display:flex;align-items:center;gap:8px;width:100%;margin-bottom:8px;padding:12px;font-size:15px;font-weight:700"><span style="flex:1;min-width:0;text-align:left">' + fsEsc(u.name) + '</span>' +
+               '<span style="font-size:11px;font-weight:400;color:#93a4ab">' + fsEsc(FS_ROLE_LABEL[u.role] || u.role) + (u.passHash ? ' &#128273;' : '') + '</span></button>';
+    });
+    inner += '<div style="display:flex;gap:8px;margin-top:4px"><input id="fsWhoOther" placeholder="Someone else &mdash; type your name" style="flex:1;min-width:0;padding:10px;border-radius:8px;border:1px solid #4a5057;background:#1a1d21;color:#eee;font-size:14px"><button class="btn" id="fsWhoGo">OK</button></div>';
+    inner += '</div>';
+    g.innerHTML = inner;
+    document.body.appendChild(g);
+    const done = name => { if (!name) return; fsWhoSet(name); g.remove(); };
+    g.querySelectorAll(".fsWhoBtn").forEach(b => b.onclick = async () => {
+      const u = users[+b.dataset.i];
+      if (!(await fsWhoAuth(u))) return;
+      done(u.name);
+    });
+    document.getElementById("fsWhoGo").onclick = async () => {
+      const name = (document.getElementById("fsWhoOther").value || "").trim();
+      if (!name) return;
+      const match = users.find(u => u.name.toLowerCase() === name.toLowerCase());
+      if (match && !(await fsWhoAuth(match))) return;
+      done(match ? match.name : name);
+    };
+    document.getElementById("fsWhoOther").addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("fsWhoGo").onclick(); });
+  } catch (e) {}
+}
+
+/* ---------- Users editor — the client's admin manages their own people (dashboard) ---------- */
+function fsUsersSave(list) {
+  if (!fsProfile) return;
+  fsProfile.users = list.map(u => ({ name: u.name, role: u.role, passHash: u.passHash || "", status: u.status || "active" }));
+  delete fsProfile.techs;
+  idbPut("fsProfile", fsProfile).catch(() => {});
+  if (fsRegister) { fsRegister.profile = fsProfile; fsMarkDirty(); }
+  fsActLog("Users updated", fsProfile.users.length + " user" + (fsProfile.users.length === 1 ? "" : "s"));
+  fsRoleRefresh();
+}
+function fsUsersOpen() {
+  if (!fsProfile) { alert("Load a company profile first — the user list lives inside the profile."); return; }
+  if (!fsCan("admin")) { alert("Only an admin can manage users."); return; }
+  const list = fsUsers().map(u => Object.assign({}, u));
+  let d = document.getElementById("fsUsersModal");
+  if (!d) { d = document.createElement("div"); d.className = "modal"; d.id = "fsUsersModal"; d.style.zIndex = "124"; document.body.appendChild(d); }
+  const render = () => {
+    let h = '<div class="modalbox" style="max-width:580px;width:95vw;max-height:84vh;overflow-y:auto;text-align:left"><h3 style="margin-bottom:4px">&#128101; Users</h3>';
+    h += '<div style="font-size:11.5px;color:#999;margin-bottom:10px">Who can use this profile and what they can do. <b>Admin</b> &mdash; everything, including managing users. <b>Office</b> &mdash; dashboard, quotes and pricebook. <b>Technician</b> &mdash; field work: tests and defects. The list is saved into the company profile, so it travels with the register. A password stops casual name-borrowing on shared devices &mdash; it is NOT real account security; that comes with cloud accounts later.</div>';
+    list.forEach((u, i) => {
+      h += '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;border-top:1px solid #3a4047;padding-top:6px">' +
+        '<input class="fsUsrName" data-i="' + i + '" value="' + fsEsc(u.name).replace(/"/g, "&quot;") + '" style="flex:1;min-width:120px;padding:7px;border-radius:7px;border:1px solid #444;background:#2e333a;color:#e8e8e8">' +
+        '<select class="fsUsrRole" data-i="' + i + '" style="padding:7px;border-radius:7px;border:1px solid #444;background:#2e333a;color:#e8e8e8">' +
+          ["admin", "office", "tech"].map(r => '<option value="' + r + '"' + (u.role === r ? " selected" : "") + '>' + FS_ROLE_LABEL[r] + '</option>').join("") + '</select>' +
+        '<button class="btn fsUsrPass" data-i="' + i + '" style="padding:6px 9px;font-size:12px" title="Optional — stops casual name-borrowing, not real security">' + (u.passHash ? "&#128273; Change" : "Password&hellip;") + '</button>' +
+        (u.passHash ? '<button class="btn fsUsrPassX" data-i="' + i + '" style="padding:6px 8px;font-size:12px" title="Remove the password">&times;&#128273;</button>' : '') +
+        '<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer"><input type="checkbox" class="fsUsrOn" data-i="' + i + '"' + (u.status === "active" ? " checked" : "") + '>active</label>' +
+        '<button class="btn fsUsrDel" data-i="' + i + '" style="padding:6px 9px;font-size:12px;color:#ff6b5e">Remove</button></div>';
+    });
+    h += '<div style="display:flex;gap:8px;margin:10px 0"><input id="fsUsrNew" placeholder="Add a user &mdash; name" style="flex:1;min-width:0;padding:8px;border-radius:8px;border:1px solid #444;background:#2e333a;color:#e8e8e8"><button class="btn" id="fsUsrAdd">&#65291; Add</button></div>';
+    h += '<div class="row" style="margin-top:8px;display:flex;gap:8px"><span style="flex:1"></span><button class="btn" id="fsUsrCX">Cancel</button><button class="btn" id="fsUsrOK" style="background:#1b8a3f;border-color:#1b8a3f;color:#fff;font-weight:700">Save users</button></div></div>';
+    d.innerHTML = h;
+    const sync = () => {
+      d.querySelectorAll(".fsUsrName").forEach(el => { list[+el.dataset.i].name = el.value.trim(); });
+      d.querySelectorAll(".fsUsrRole").forEach(el => { list[+el.dataset.i].role = el.value; });
+      d.querySelectorAll(".fsUsrOn").forEach(el => { list[+el.dataset.i].status = el.checked ? "active" : "disabled"; });
+    };
+    d.querySelectorAll(".fsUsrPass").forEach(b => b.onclick = async () => {
+      sync();
+      const u = list[+b.dataset.i];
+      const p1 = prompt("Password for " + (u.name || "this user") + " (4+ characters — convenience gate, not security):") || "";
+      if (!p1) return;
+      if (p1.length < 4) { alert("Too short — password not set."); return; }
+      u.passHash = await fsSha256(p1);
+      render();
+    });
+    d.querySelectorAll(".fsUsrPassX").forEach(b => b.onclick = () => { sync(); list[+b.dataset.i].passHash = ""; render(); });
+    d.querySelectorAll(".fsUsrDel").forEach(b => b.onclick = () => {
+      sync();
+      const u = list[+b.dataset.i];
+      if (!confirm("Remove " + (u.name || "this user") + " from the list?\n\nTheir name stays on anything they already did — this only stops future use.")) return;
+      list.splice(+b.dataset.i, 1);
+      render();
+    });
+    d.querySelector("#fsUsrAdd").onclick = () => {
+      sync();
+      const n = (d.querySelector("#fsUsrNew").value || "").trim();
+      if (!n) return;
+      if (list.some(u => u.name.toLowerCase() === n.toLowerCase())) { alert("That name is already on the list."); return; }
+      list.push({ name: n, role: "tech", passHash: "", status: "active" });
+      render();
+    };
+    d.querySelector("#fsUsrNew").addEventListener("keydown", e => { if (e.key === "Enter") d.querySelector("#fsUsrAdd").onclick(); });
+    d.querySelector("#fsUsrCX").onclick = () => d.classList.remove("show");
+    d.querySelector("#fsUsrOK").onclick = () => {
+      sync();
+      const named = list.filter(u => u.name);
+      const lower = named.map(u => u.name.toLowerCase());
+      if (lower.length !== new Set(lower).size) { alert("Two users have the same name — make them distinct."); return; }
+      if (named.length && !named.some(u => u.status === "active" && u.role === "admin")) {
+        alert("Keep at least one ACTIVE Admin — otherwise nobody can manage users or get back in here."); return;
+      }
+      fsUsersSave(named);
+      d.classList.remove("show");
+      alert("✓ Users saved into the profile. Save the register so other devices get the change.");
+    };
+  };
+  d.classList.add("show");
+  render();
+}
 function fsGateShow(kind, a, extra) {
   fsGateRemove();
   const g = document.createElement("div");
@@ -15505,8 +15844,28 @@ function fsBldDefault() {
   fsBldGroups().forEach(([, gk, items]) => items.forEach(([k]) => { m[(gk ? gk + "." : "") + k] = true; }));
   const g = {};
   fsBldGroups().forEach(([, gk, items]) => items.forEach(([k]) => { g[(gk ? gk + "." : "") + k] = true; }));
-  return { name: "", modules: m, grants: g, equipment: null, equipmentItems: null, checklists: null,
+  return { name: "", users: [], modules: m, grants: g, equipment: null, equipmentItems: null, checklists: null,
            access: { mode: "none", start: "", expiry: "", user: "", pass: "", passHash: "", contact: "" }, incl: true };
+}
+/* users textarea <-> list. Format "Name, role" per line; role defaults to tech.
+   passHash/status survive a rename-free edit by lowercase name match. */
+function fsBldUsersText(users) {
+  return (users || []).map(u => u.name + (u.role && u.role !== "tech" ? ", " + u.role : "")).join("\n");
+}
+function fsBldUsersParse(txt, prev) {
+  const keep = {};
+  (prev || []).forEach(u => { if (u && u.name) keep[u.name.toLowerCase()] = u; });
+  const out = [];
+  String(txt || "").split("\n").forEach(ln => {
+    const parts = ln.split(",");
+    const name = (parts[0] || "").trim();
+    if (!name) return;
+    let role = (parts[1] || "").trim().toLowerCase();
+    if (!/^(admin|office|tech)$/.test(role)) role = "tech";
+    const old = keep[name.toLowerCase()] || {};
+    out.push({ name: name, role: role, passHash: old.passHash || "", status: old.status || "active" });
+  });
+  return out;
 }
 const FS_BLD_PRESETS = {
   full: () => {},
@@ -15541,6 +15900,9 @@ function fsBuilderRender() {
   });
   h += '<span style="font-size:11px;color:#999">then tweak anything below</span></div>';
   h += '<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;margin-bottom:3px">Client / company name</div><input id="fsBldName" style="width:100%;padding:9px;border-radius:8px;border:1px solid #444;background:#2e333a;color:#e8e8e8" value="' + fsEsc(st.name).replace(/"/g, "&quot;") + '"></div>';
+  h += '<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;margin-bottom:3px">Users <span style="color:#999;font-weight:400">(one per line: Name, role &mdash; optional)</span></div>' +
+       '<textarea id="fsBldUsers" rows="3" style="width:100%;box-sizing:border-box;padding:9px;border-radius:8px;border:1px solid #444;background:#2e333a;color:#e8e8e8;font-size:13px;resize:vertical" placeholder="e.g.&#10;J. Citizen, admin&#10;A. Nother, office&#10;B. Field">' + fsEsc(fsBldUsersText(st.users)) + '</textarea>' +
+       '<div style="font-size:11px;color:#999;margin-top:2px">Roles: <b>admin</b> (everything, manages users), <b>office</b> (dashboard, quotes, pricebook), <b>tech</b> (field work &mdash; the default). Each device asks "who is using this device?" and stamps that name on saves, tests and defects. The client\'s admin can edit users and set passwords later on their dashboard. Soft enforcement &mdash; real accounts come with the backend.</div></div>';
   fsBldGroups().forEach(([title, gk, items], gi) => {
     h += '<div style="font-size:12px;font-weight:700;color:#7ddb8f;margin:10px 0 5px">' + title.toUpperCase() + '</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 10px">';
     items.forEach(([k, lbl]) => {
@@ -15649,6 +16011,8 @@ function fsBuilderRender() {
   body.querySelectorAll("[data-bldpre]").forEach(b => b.onclick = () => {
     fsBld = fsBldDefault();
     fsBld.name = document.getElementById("fsBldName").value;
+    const uPre = document.getElementById("fsBldUsers");
+    fsBld.users = uPre ? fsBldUsersParse(uPre.value, st.users) : [];
     fsBld.access = st.access;
     fsBld.incl = document.getElementById("fsBldIncl").checked;
     (FS_BLD_PRESETS[b.dataset.bldpre] || (() => {}))(fsBld);
@@ -15656,6 +16020,8 @@ function fsBuilderRender() {
   });
   const syncTop = () => {
     st.name = document.getElementById("fsBldName").value;
+    const uEl = document.getElementById("fsBldUsers");
+    if (uEl) st.users = fsBldUsersParse(uEl.value, st.users);
     st.incl = document.getElementById("fsBldIncl").checked;
     body.querySelectorAll("[data-bldmod]").forEach(cb => { st.modules[cb.dataset.bldmod] = cb.checked; });
     const gm = document.getElementById("fsBldMode");
@@ -15694,6 +16060,9 @@ function fsBuilderRender() {
           if (mg0.equipment.length) { st2.equipment = mg0.equipment; st2.equipmentItems = mg0.equipmentItems; }
         }
         st2.name = (obj.company && obj.company.name) || "";
+        st2.users = Array.isArray(obj.users)
+          ? obj.users.map(u => ({ name: String((u && u.name) || "").trim(), role: (u && /^(admin|office|tech)$/.test(u.role)) ? u.role : "tech", passHash: (u && u.passHash) || "", status: (u && u.status) === "disabled" ? "disabled" : "active" })).filter(u => u.name)
+          : (Array.isArray(obj.techs) ? obj.techs.map(s => ({ name: String(s || "").trim(), role: "tech", passHash: "", status: "active" })).filter(u => u.name) : []);
         if (obj.modules) {
           const flat = (o, pre) => Object.entries(o).forEach(([k, v]) => {
             if (v && typeof v === "object") flat(v, pre + k + ".");
@@ -15731,6 +16100,14 @@ function fsBuilderRender() {
       if (!confirm("WARNING — the equipment fields and test checklists box is UNTICKED.\n\nThe exported profile will contain NO equipment fields and NO checklists. Anyone loading it loses them.\n\nExport anyway?")) return;
     }
     const out = { app: "firespark-profile", version: 2, created: new Date().toISOString().slice(0, 10), company: { name: name }, modules: modules, grants: grants };
+    if ((st.users || []).length) {
+      /* a user list with no active admin locks the client out of managing users — promote the first */
+      if (!st.users.some(u => u.role === "admin" && u.status !== "disabled")) {
+        st.users[0].role = "admin";
+        alert("No admin in the user list — " + st.users[0].name + " (first listed) was made Admin so the client can manage their own users.");
+      }
+      out.users = st.users.map(u => ({ name: u.name, role: u.role, passHash: u.passHash || "", status: u.status || "active" }));
+    }
     const eq = st.equipment || base.equipment;
     const eqi = st.equipmentItems || base.equipmentItems;
     const ckl = st.checklists || base.checklists;
@@ -15758,23 +16135,35 @@ try {
     _fsDashRenderD();
     try {
       const wrap = document.getElementById("fsDashView");
-      if (!wrap || document.getElementById("fsBuilderBtn")) return;
-      const row = document.createElement("div");
-      row.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px";
-      const ed = document.createElement("button");
-      ed.className = "fsbtn"; ed.id = "fsEditorBtn";
-      ed.innerHTML = "&#127918; Features";
-      ed.title = "Turn parts of the app on or off for your company";
-      ed.onclick = fsEditorOpen;
-      row.appendChild(ed);
-      /* SparkCommand: VENDOR ONLY, temporary. Remove this button when the admin app exists. */
-      const b = document.createElement("button");
-      b.className = "fsbtn"; b.id = "fsBuilderBtn";
-      b.innerHTML = "&#9889; SparkCommand";
-      b.title = "Profile builder (vendor)";
-      b.onclick = fsSparkOpen;
-      row.appendChild(b);
-      wrap.insertBefore(row, wrap.children[1] || null);
+      if (!wrap) return;
+      if (!document.getElementById("fsBuilderBtn")) {
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px";
+        const ed = document.createElement("button");
+        ed.className = "fsbtn"; ed.id = "fsEditorBtn";
+        ed.innerHTML = "&#127918; Features";
+        ed.title = "Turn parts of the app on or off for your company";
+        ed.onclick = fsEditorOpen;
+        row.appendChild(ed);
+        /* v1.31: the client's admin manages their own user list here */
+        const us = document.createElement("button");
+        us.className = "fsbtn"; us.id = "fsUsersBtn";
+        us.innerHTML = "&#128101; Users";
+        us.title = "Who can use this profile and what they can do (admin)";
+        us.onclick = fsUsersOpen;
+        row.appendChild(us);
+        /* SparkCommand: VENDOR ONLY, temporary. Remove this button when the admin app exists. */
+        const b = document.createElement("button");
+        b.className = "fsbtn"; b.id = "fsBuilderBtn";
+        b.innerHTML = "&#9889; SparkCommand";
+        b.title = "Profile builder (vendor)";
+        b.onclick = fsSparkOpen;
+        row.appendChild(b);
+        wrap.insertBefore(row, wrap.children[1] || null);
+      }
+      /* role gating re-applied every render — Features and Users are admin tools */
+      const adm = (typeof fsCan !== "function") || fsCan("admin");
+      ["fsEditorBtn", "fsUsersBtn"].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = adm ? "" : "none"; });
     } catch (e) {}
   };
 } catch (e) {}
